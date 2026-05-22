@@ -195,6 +195,26 @@
   .tag-bouwteam { background: rgba(59,127,255,0.12); color: var(--accent); }
   .tag-liander { background: rgba(34,201,122,0.12); color: var(--green); }
   .tag-ahak { background: rgba(249,115,22,0.12); color: var(--orange); }
+
+  /* Import page */
+  .dropzone { border: 2px dashed var(--border2); border-radius: var(--radius); padding: 40px 24px; text-align: center; cursor: pointer; transition: all 0.2s; background: var(--bg2); }
+  .dropzone:hover, .dropzone.drag-over { border-color: var(--accent); background: rgba(59,127,255,0.05); }
+  .dropzone-icon { font-size: 32px; margin-bottom: 12px; }
+  .dropzone p { color: var(--text2); font-size: 13px; margin-bottom: 6px; }
+  .dropzone small { color: var(--text3); font-size: 11px; }
+  .import-preview { margin-top: 20px; }
+  .import-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 6px; background: var(--bg3); border: 1px solid var(--border); margin-bottom: 6px; font-size: 13px; }
+  .import-row-num { font-family: var(--mono); font-size: 11px; color: var(--text3); min-width: 24px; }
+  .import-row-text { flex: 1; color: var(--text); }
+  .import-row-status { font-size: 11px; min-width: 80px; text-align: right; }
+  .import-status-waiting { color: var(--text3); }
+  .import-status-running { color: var(--accent); display: flex; align-items: center; gap: 5px; justify-content: flex-end; }
+  .import-status-done { color: var(--green); }
+  .import-status-error { color: var(--red); }
+  .import-progress { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 16px; }
+  .import-progress-label { font-size: 13px; color: var(--text2); margin-bottom: 8px; display: flex; justify-content: space-between; }
+  .prog-bar { height: 6px; background: var(--bg3); border-radius: 3px; }
+  .prog-fill { height: 100%; border-radius: 3px; background: var(--accent); transition: width 0.4s; }
 </style>
 </head>
 <body>
@@ -816,6 +836,177 @@ function exportToExcel(project, risks) {
   showToast('Excel geëxporteerd: ' + fname, 'success');
 }
 
+// Import page
+function ImportPage({ project, onDone, nextNum, risks }) {
+  const [rows, setRows] = useState([]);        // { text, status: 'waiting'|'running'|'done'|'error', msg }
+  const [importing, setImporting] = useState(false);
+  const [done, setDone] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const fileRef = useRef();
+  const abortRef = useRef(false);
+
+  const handleFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      // Collect non-empty strings from first column, skip header if it looks like one
+      const texts = data
+        .map(r => String(r[0] || '').trim())
+        .filter(t => t.length > 0);
+      // Skip first row if it looks like a header (no digits, short)
+      const start = (texts.length > 0 && /^[a-zA-Z\s]+$/.test(texts[0]) && texts[0].length < 40) ? 1 : 0;
+      const events = texts.slice(start);
+      if (events.length === 0) { showToast('Geen regels gevonden in het bestand', 'error'); return; }
+      setRows(events.map(t => ({ text: t, status: 'waiting', msg: '' })));
+      setDone(false);
+      setProgress(0);
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.currentTarget.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  };
+
+  const runImport = async () => {
+    if (!project?.id) { showToast('Stel eerst een project in', 'error'); return; }
+    if (rows.length === 0) return;
+    setImporting(true);
+    abortRef.current = false;
+    let currentNext = nextNum;
+
+    for (let i = 0; i < rows.length; i++) {
+      if (abortRef.current) break;
+      // Mark running
+      setRows(r => r.map((row, idx) => idx === i ? { ...row, status: 'running' } : row));
+
+      try {
+        const ai = await analyzeRisk(rows[i].text);
+        const payload = {
+          project_id: project.id,
+          volgnummer: currentNext + i,
+          gebeurtenis: rows[i].text,
+          oorzaken: ai.oorzaken || '',
+          gevolgen: ai.gevolgen || '',
+          beheersmaatregelen: ai.beheer || '',
+          kans_i: ai.kans_i || 0,
+          tijd_i: ai.tijd_i || 0,
+          geld_i: ai.geld_i || 0,
+          kwaliteit_i: ai.kwaliteit_i || 0,
+          veiligheid_i: ai.veiligheid_i || 0,
+          omgeving_i: ai.omgeving_i || 0,
+          kans_r: 0, tijd_r: 0, geld_r: 0, kwaliteit_r: 0, veiligheid_r: 0, omgeving_r: 0,
+          status: 'Concept',
+          opmerking: ai.toelichting ? `AI: ${ai.toelichting}` : ''
+        };
+        await sbFetch('/risico_items', { method: 'POST', body: JSON.stringify(payload) });
+        setRows(r => r.map((row, idx) => idx === i ? { ...row, status: 'done', msg: `Score: ${(ai.kans_i||0) * Math.max(ai.tijd_i||0, ai.geld_i||0)}` } : row));
+      } catch (e) {
+        setRows(r => r.map((row, idx) => idx === i ? { ...row, status: 'error', msg: e.message } : row));
+      }
+      setProgress(Math.round(((i + 1) / rows.length) * 100));
+    }
+    setImporting(false);
+    setDone(true);
+    showToast(`Import klaar — ${rows.length} risico's verwerkt`, 'success');
+  };
+
+  const reset = () => { setRows([]); setDone(false); setProgress(0); };
+
+  return (
+    <div style={{maxWidth:'680px'}}>
+      <div style={{marginBottom:'20px'}}>
+        <h2 style={{fontSize:'18px',fontWeight:600,marginBottom:'4px'}}>Bulk importeren</h2>
+        <p style={{color:'var(--text2)',fontSize:'13px'}}>Upload een Excel met ongewenste gebeurtenissen. De AI analyseert elke regel en vult oorzaken, gevolgen en scores in.</p>
+      </div>
+
+      {rows.length === 0 && (
+        <div>
+          <div
+            className="dropzone"
+            onClick={() => fileRef.current.click()}
+            onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }}
+            onDragLeave={e => e.currentTarget.classList.remove('drag-over')}
+            onDrop={handleDrop}
+          >
+            <div className="dropzone-icon">📂</div>
+            <p>Klik om een bestand te kiezen, of sleep het hier naartoe</p>
+            <small>Excel (.xlsx, .xls) — eerste kolom = ongewenste gebeurtenissen</small>
+          </div>
+          <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={e => handleFile(e.target.files[0])} />
+
+          <div className="card" style={{marginTop:'20px'}}>
+            <div className="card-title">Verwacht format</div>
+            <div style={{background:'var(--bg3)',borderRadius:'6px',padding:'12px 16px',fontFamily:'var(--mono)',fontSize:'12px',color:'var(--text2)'}}>
+              <div style={{color:'var(--text3)',marginBottom:'6px'}}>Kolom A (geen header vereist)</div>
+              <div>ZRO's worden niet tijdig ondertekend</div>
+              <div>MSR zijn niet tijdig geplaatst</div>
+              <div>Beperkingen in de uitvoering</div>
+              <div style={{color:'var(--text3)'}}>...</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {rows.length > 0 && (
+        <div>
+          {importing || done ? (
+            <div className="import-progress">
+              <div className="import-progress-label">
+                <span>{done ? 'Klaar' : 'Bezig met analyseren...'}</span>
+                <span style={{fontFamily:'var(--mono)'}}>{progress}%</span>
+              </div>
+              <div className="prog-bar"><div className="prog-fill" style={{width:`${progress}%`}} /></div>
+            </div>
+          ) : (
+            <div style={{display:'flex',gap:'8px',marginBottom:'16px',alignItems:'center'}}>
+              <button className="ai-btn" onClick={runImport}>
+                <span>✦</span><span>Start AI-analyse ({rows.length} regels)</span>
+              </button>
+              <button className="btn btn-secondary" onClick={reset}>Ander bestand</button>
+              <span style={{fontSize:'12px',color:'var(--text3)',marginLeft:'4px'}}>Duurt ~{Math.ceil(rows.length * 4)} seconden</span>
+            </div>
+          )}
+
+          <div className="import-preview">
+            {rows.map((row, i) => (
+              <div key={i} className="import-row">
+                <div className="import-row-num">#{i + 1}</div>
+                <div className="import-row-text">{row.text}</div>
+                <div className="import-row-status">
+                  {row.status === 'waiting' && <span className="import-status-waiting">Wacht</span>}
+                  {row.status === 'running' && <span className="import-status-running"><div className="ai-spinner"/>Analyseren</span>}
+                  {row.status === 'done' && <span className="import-status-done">✓ {row.msg}</span>}
+                  {row.status === 'error' && <span className="import-status-error">✗ Fout</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {done && (
+            <div style={{marginTop:'16px',display:'flex',gap:'8px'}}>
+              <button className="btn btn-success" onClick={onDone}>Bekijk risico's →</button>
+              <button className="btn btn-secondary" onClick={reset}>Nieuwe import</button>
+            </div>
+          )}
+
+          {importing && (
+            <button className="btn btn-danger btn-sm" style={{marginTop:'12px'}} onClick={() => { abortRef.current = true; }}>
+              Stoppen
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Main App
 function App() {
   const [page, setPage] = useState('dashboard');
@@ -898,6 +1089,7 @@ function App() {
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: '◈' },
     { id: 'risicos', label: "Risico's", icon: '⚑' },
+    { id: 'import', label: 'Importeren', icon: '↑' },
     { id: 'project', label: 'Project', icon: '⊙' },
   ];
 
@@ -958,6 +1150,11 @@ function App() {
                 onDelete={handleDeleteRisk}
               />
             )
+          )}
+
+          {/* Import */}
+          {page === 'import' && !showEditor && (
+            <ImportPage project={project} onDone={async () => { if(project?.id) { await loadRisks(project.id); setPage('risicos'); } }} nextNum={nextNum} risks={risks} />
           )}
 
           {/* Project settings */}
