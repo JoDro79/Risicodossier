@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Risicodossier — A.Hak Electron</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f1117;
+    --bg2: #161b27;
+    --bg3: #1e2535;
+    --border: #2a3347;
+    --border2: #3a4a66;
+    --accent: #3b7fff;
+    --accent2: #1a5ce8;
+    --text: #e8ecf4;
+    --text2: #8a9bb8;
+    --text3: #5a6b85;
+    --green: #22c97a;
+    --yellow: #f0b429;
+    --red: #f05252;
+    --orange: #f97316;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; min-height: 100vh; }
+  
+  /* Layout */
+  .app { display: flex; flex-direction: column; min-height: 100vh; }
+  .topbar { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 24px; height: 56px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+  .topbar-left { display: flex; align-items: center; gap: 16px; }
+  .logo { font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--accent); letter-spacing: 0.05em; }
+  .project-badge { background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; font-size: 12px; color: var(--text2); font-family: var(--mono); }
+  .topbar-right { display: flex; gap: 8px; }
+  
+  .main { display: flex; flex: 1; }
+  .sidebar { width: 200px; background: var(--bg2); border-right: 1px solid var(--border); padding: 16px 0; flex-shrink: 0; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 16px; cursor: pointer; color: var(--text2); font-size: 13px; transition: all 0.15s; border-left: 2px solid transparent; }
+  .nav-item:hover { color: var(--text); background: var(--bg3); }
+  .nav-item.active { color: var(--accent); border-left-color: var(--accent); background: rgba(59,127,255,0.08); }
+  .nav-icon { width: 16px; text-align: center; }
+  
+  .content { flex: 1; padding: 24px; overflow-y: auto; }
+  .page { display: none; }
+  .page.active { display: block; }
+  
+  /* Project setup */
+  .setup-wrap { max-width: 560px; margin: 0 auto; padding-top: 20px; }
+  .setup-header { margin-bottom: 28px; }
+  .setup-header h1 { font-size: 22px; font-weight: 600; margin-bottom: 6px; }
+  .setup-header p { color: var(--text2); font-size: 13px; }
+  
+  /* Cards */
+  .card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
+  .card-title { font-size: 13px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 16px; }
+  
+  /* Form elements */
+  .form-grid { display: grid; gap: 12px; }
+  .form-grid-2 { grid-template-columns: 1fr 1fr; }
+  .form-group { display: flex; flex-direction: column; gap: 5px; }
+  label { font-size: 12px; color: var(--text2); }
+  input, textarea, select { background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: var(--sans); font-size: 13px; padding: 8px 10px; outline: none; transition: border-color 0.15s; width: 100%; }
+  input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 72px; line-height: 1.5; }
+  select option { background: var(--bg3); }
+  
+  /* Buttons */
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: all 0.15s; font-family: var(--sans); white-space: nowrap; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent2); }
+  .btn-secondary { background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { border-color: var(--border2); }
+  .btn-success { background: rgba(34,201,122,0.15); color: var(--green); border: 1px solid rgba(34,201,122,0.25); }
+  .btn-success:hover { background: rgba(34,201,122,0.25); }
+  .btn-danger { background: rgba(240,82,82,0.12); color: var(--red); border: 1px solid rgba(240,82,82,0.2); }
+  .btn-danger:hover { background: rgba(240,82,82,0.22); }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-icon { width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; cursor: pointer; border: none; transition: all 0.15s; }
+  
+  /* Risk list */
+  .risk-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; gap: 12px; flex-wrap: wrap; }
+  .risk-toolbar-left { display: flex; gap: 8px; align-items: center; }
+  .search-input { width: 220px; }
+  
+  .risk-table { width: 100%; border-collapse: collapse; }
+  .risk-table th { text-align: left; padding: 8px 10px; font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); font-weight: 500; }
+  .risk-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
+  .risk-table tr:hover td { background: rgba(255,255,255,0.02); }
+  .risk-table .col-id { width: 50px; font-family: var(--mono); font-size: 12px; color: var(--text3); }
+  .risk-table .col-event { max-width: 280px; }
+  .risk-table .col-score { width: 70px; text-align: center; }
+  .risk-table .col-status { width: 90px; }
+  .risk-table .col-actions { width: 80px; text-align: right; }
+  .event-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text); }
+  .event-sub { font-size: 11px; color: var(--text3); margin-top: 2px; }
+  
+  /* Status badges */
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+  .badge-concept { background: rgba(90,107,133,0.2); color: var(--text3); }
+  .badge-voorstel { background: rgba(240,180,41,0.15); color: var(--yellow); }
+  .badge-vigerend { background: rgba(59,127,255,0.15); color: var(--accent); }
+  .badge-beheerst { background: rgba(34,201,122,0.15); color: var(--green); }
+  .badge-vervallen { background: rgba(90,107,133,0.12); color: var(--text3); }
+  .badge-opgetreden { background: rgba(240,82,82,0.15); color: var(--red); }
+  
+  /* Score display */
+  .score-pill { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 6px; font-family: var(--mono); font-size: 13px; font-weight: 500; }
+  .score-0 { background: rgba(90,107,133,0.15); color: var(--text3); }
+  .score-1,.score-2 { background: rgba(34,201,122,0.15); color: var(--green); }
+  .score-3,.score-4 { background: rgba(240,180,41,0.15); color: var(--yellow); }
+  .score-5,.score-6 { background: rgba(249,115,22,0.15); color: var(--orange); }
+  .score-7 { background: rgba(240,82,82,0.15); color: var(--red); }
+  .score-composite { font-family: var(--mono); font-size: 13px; font-weight: 600; }
+  
+  /* Risk detail / edit panel */
+  .panel { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .panel-header { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .panel-title { font-size: 15px; font-weight: 600; }
+  .panel-body { padding: 20px; }
+  
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+  .tab { padding: 9px 16px; font-size: 13px; cursor: pointer; color: var(--text2); border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all 0.15s; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  
+  /* Scores grid */
+  .scores-section { margin-bottom: 20px; }
+  .scores-label { font-size: 12px; color: var(--text2); margin-bottom: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
+  .scores-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+  .score-input-card { background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; padding: 8px; text-align: center; }
+  .score-input-label { font-size: 10px; color: var(--text3); margin-bottom: 4px; }
+  .score-input-card input { background: transparent; border: none; text-align: center; font-family: var(--mono); font-size: 18px; font-weight: 600; padding: 0; width: 100%; color: var(--text); }
+  .score-input-card input:focus { outline: none; }
+  
+  /* AI button */
+  .ai-btn { background: linear-gradient(135deg, rgba(59,127,255,0.2), rgba(138,77,255,0.2)); border: 1px solid rgba(59,127,255,0.4); color: var(--accent); display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; font-family: var(--sans); }
+  .ai-btn:hover { background: linear-gradient(135deg, rgba(59,127,255,0.3), rgba(138,77,255,0.3)); }
+  .ai-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .ai-spinner { width: 14px; height: 14px; border: 2px solid rgba(59,127,255,0.3); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  
+  /* Toast */
+  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; font-size: 13px; color: var(--text); z-index: 1000; opacity: 0; transform: translateY(8px); transition: all 0.2s; pointer-events: none; max-width: 320px; }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.toast-success { border-color: rgba(34,201,122,0.4); }
+  .toast.toast-error { border-color: rgba(240,82,82,0.4); }
+  
+  /* Dashboard */
+  .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .stat-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
+  .stat-value { font-size: 28px; font-family: var(--mono); font-weight: 600; color: var(--text); }
+  .stat-label { font-size: 12px; color: var(--text2); margin-top: 4px; }
+  
+  /* Table scroll wrapper */
+  .table-wrap { overflow-x: auto; }
+  
+  /* Empty state */
+  .empty { text-align: center; padding: 48px 20px; color: var(--text3); }
+  .empty-icon { font-size: 32px; margin-bottom: 12px; }
+  .empty p { margin-bottom: 16px; }
+  
+  /* Divider */
+  hr.divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+  
+  /* Row actions */
+  .row-actions { display: flex; gap: 4px; justify-content: flex-end; }
+  
+  /* Back btn */
+  .back-btn { display: inline-flex; align-items: center; gap: 6px; color: var(--text2); font-size: 13px; cursor: pointer; margin-bottom: 16px; padding: 4px 0; }
+  .back-btn:hover { color: var(--text); }
+  
+  /* Notification dot */
+  .notif { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; margin-left: 4px; vertical-align: middle; }
+  
+  /* Progress bar */
+  .prog-bar { height: 4px; background: var(--bg3); border-radius: 2px; margin-top: 6px; }
+  .prog-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width 0.3s; }
+  
+  /* Responsive */
+  @media (max-width: 700px) {
+    .sidebar { display: none; }
+    .stats-grid { grid-template-columns: 1fr 1fr; }
+    .scores-grid { grid-template-columns: repeat(3, 1fr); }
+    .form-grid-2 { grid-template-columns: 1fr; }
+  }
+
+  .tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-family: var(--mono); }
+  .tag-bouwteam { background: rgba(59,127,255,0.12); color: var(--accent); }
+  .tag-liander { background: rgba(34,201,122,0.12); color: var(--green); }
+  .tag-ahak { background: rgba(249,115,22,0.12); color: var(--orange); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="toast" id="toast"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// Config
+const SUPABASE_URL = 'https://xaoikwztaxhvcjlmjbspq.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhhb2lrd3p0c3h2Y2psbWpic3BxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNjg1MzAsImV4cCI6MjA5Mjc0NDUzMH0.5_dbpmdOAXxj9xPwcsQuz6Neo_-hHHZZUN9PyM8Ld7U';
+const AI_MODEL = 'claude-sonnet-4-20250514';
+
+const STATUS_LIST = ['Concept','Voorstel','Vigerend','Beheerst','Vervallen','Opgetreden'];
+const FASE_LIST = ['Bouwteam','Uitvoering','NAOK','Ontwerp'];
+const ALLOC_LIST = ['Bouwteam','Liander','A.Hak'];
+
+const SCORE_LABELS = ['Kans','Tijd','Geld','Kwaliteit','Veiligheid','Omgeving'];
+const SCORE_KEYS_I = ['kans_i','tijd_i','geld_i','kwaliteit_i','veiligheid_i','omgeving_i'];
+const SCORE_KEYS_R = ['kans_r','tijd_r','geld_r','kwaliteit_r','veiligheid_r','omgeving_r'];
+
+// Supabase helpers
+async function sbFetch(path, opts = {}) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': opts.prefer || 'return=representation',
+      ...opts.headers
+    },
+    ...opts
+  });
+  if (!r.ok) { const e = await r.text(); throw new Error(e); }
+  const txt = await r.text();
+  return txt ? JSON.parse(txt) : null;
+}
+
+// Toast
+function showToast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast show ${type ? 'toast-' + type : ''}`;
+  setTimeout(() => { t.className = 'toast'; }, 3000);
+}
+
+// Score color class
+function scoreClass(v) {
+  const n = parseInt(v) || 0;
+  return `score-${Math.min(n, 7)}`;
+}
+
+// Composite risk score
+function riskScore(r, prefix) {
+  const k = r[`kans_${prefix}`] || 0;
+  const t = r[`tijd_${prefix}`] || 0;
+  const g = r[`geld_${prefix}`] || 0;
+  return k * Math.max(t, g);
+}
+
+// Status badge class
+function statusClass(s) {
+  if (!s) return 'badge-concept';
+  return `badge-${s.toLowerCase()}`;
+}
+
+// AI analysis
+async function analyzeRisk(gebeurtenis) {
+  const systemPrompt = `Je bent een risico-expert voor kabelinstallatie-projecten van A.Hak Electron in Nederland (Liander/Alliander netbeheer). Projecten betreffen laagspanning, middenspanning, hoogspanning, glasvezel en datacommunicatie. Perceeleigenaren, ZRO-processen, GR-procedures, vergunningen, HDD-boringen en MSR-plaatsingen zijn gangbare onderwerpen.
+
+Analyseer de opgegeven ongewenste gebeurtenis voor een klein project (TSB < €5.000.000). Gebruik de kwantificeertabel voor kleine projecten:
+- Kans: 1=<5%, 2=5-15%, 3=15-25%, 4=25-35%, 5=35-45%, 6=45-55%, 7=55-85%
+- Tijd: 1=<0.5wk, 2=0.5-1wk, 3=1-2wk, 4=2-4wk, 5=4-6wk, 6=6-8wk, 7=>2mnd
+- Geld: 1=<€5k, 2=€5-10k, 3=€10-25k, 4=€25-50k, 5=€50-75k, 6=€75-100k, 7=>€100k
+- Kwaliteit: 0=geen, 1=vragen intern, 2=onderzoek nodig, 3=afwijking spec, 4=aanpassing mogelijk, 5=herstel zichtbaar, 6=aanpassing specs nodig, 7=niet herstelbaar
+- Veiligheid: 0=geen, 1=gering geen EHBO, 2=gering EHBO, 3=arts nodig, 4=grote impact verzuim, 5=verzuim>7wk, 6=blijvend letsel, 7=dodelijk
+- Omgeving: 0=geen, 1=intern, 2=lokale media, 3=sectoronrust, 4=regionaal, 5=nationaal beperkt, 6=nationaal aanzienlijk, 7=internationaal
+
+Geef ALLEEN JSON, geen markdown:
+{"oorzaken":"genummerde lijst oorzaken","gevolgen":"genummerde lijst gevolgen","beheer":"genummerde lijst beheersmaatregelen","kans_i":0,"tijd_i":0,"geld_i":0,"kwaliteit_i":0,"veiligheid_i":0,"omgeving_i":0,"toelichting":"1-2 zinnen onderbouwing scores"}`;
+
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: AI_MODEL,
+      max_tokens: 1000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: `Analyseer dit risico: "${gebeurtenis}"` }]
+    })
+  });
+  const data = await resp.json();
+  const text = data.content?.filter(b => b.type === 'text').map(b => b.text).join('');
+  const clean = text.replace(/```json|```/g, '').trim();
+  return JSON.parse(clean);
+}
+
+// Project setup page
+function ProjectSetup({ project, onSave }) {
+  const [form, setForm] = useState(project || { naam: '', nummer: '', tsb: '', opsteller: '', datum_actualisatie: new Date().toISOString().slice(0, 10) });
+  const [saving, setSaving] = useState(false);
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    if (!form.naam.trim()) { showToast('Projectnaam is verplicht', 'error'); return; }
+    setSaving(true);
+    try {
+      let result;
+      if (project?.id) {
+        result = await sbFetch(`/risico_projecten?id=eq.${project.id}`, {
+          method: 'PATCH', body: JSON.stringify(form)
+        });
+      } else {
+        result = await sbFetch('/risico_projecten', { method: 'POST', body: JSON.stringify(form) });
+      }
+      showToast('Project opgeslagen', 'success');
+      onSave(result?.[0] || result);
+    } catch (e) { showToast('Fout: ' + e.message, 'error'); }
+    setSaving(false);
+  };
+
+  return (
+    <div className="setup-wrap">
+      <div className="setup-header">
+        <h1>Projectgegevens</h1>
+        <p>Stel de basisgegevens van het risicodossier in.</p>
+      </div>
+      <div className="card">
+        <div className="card-title">Project</div>
+        <div className="form-grid form-grid-2">
+          <div className="form-group" style={{gridColumn:'1/-1'}}>
+            <label>Projectnaam *</label>
+            <input value={form.naam} onChange={e => set('naam', e.target.value)} placeholder="bijv. Zuiderdijkweg Wieringerwerf" />
+          </div>
+          <div className="form-group">
+            <label>Projectnummer</label>
+            <input value={form.nummer} onChange={e => set('nummer', e.target.value)} placeholder="bijv. 34938A" />
+          </div>
+          <div className="form-group">
+            <label>TSB (€)</label>
+            <input type="number" value={form.tsb} onChange={e => set('tsb', e.target.value)} placeholder="585992" />
+          </div>
+          <div className="form-group">
+            <label>Opsteller</label>
+            <input value={form.opsteller} onChange={e => set('opsteller', e.target.value)} placeholder="naam opsteller" />
+          </div>
+          <div className="form-group">
+            <label>Datum actualisatie</label>
+            <input type="date" value={form.datum_actualisatie} onChange={e => set('datum_actualisatie', e.target.value)} />
+          </div>
+        </div>
+      </div>
+      <button className="btn btn-primary" onClick={save} disabled={saving}>
+        {saving ? 'Opslaan...' : project?.id ? 'Wijzigingen opslaan' : 'Project aanmaken →'}
+      </button>
+    </div>
+  );
+}
+
+// Risk row in table
+function RiskRow({ risk, onEdit, onDelete }) {
+  const si = riskScore(risk, 'i');
+  const sr = riskScore(risk, 'r');
+  return (
+    <tr>
+      <td className="col-id">{risk.volgnummer}</td>
+      <td className="col-event">
+        <div className="event-text">{risk.gebeurtenis || <span style={{color:'var(--text3)'}}>—</span>}</div>
+        {risk.eigenaar && <div className="event-sub">{risk.eigenaar}</div>}
+      </td>
+      <td className="col-status"><span className={`badge ${statusClass(risk.status)}`}>{risk.status || 'Concept'}</span></td>
+      <td className="col-score">
+        {si > 0 ? <span className={`score-pill ${scoreClass(si)}`}>{si}</span> : <span style={{color:'var(--text3)'}}>—</span>}
+      </td>
+      <td className="col-score">
+        {sr > 0 ? <span className={`score-pill ${scoreClass(sr)}`}>{sr}</span> : <span style={{color:'var(--text3)'}}>—</span>}
+      </td>
+      <td className="col-actions">
+        <div className="row-actions">
+          <button className="btn btn-icon btn-secondary" title="Bewerken" onClick={() => onEdit(risk)}>✏️</button>
+          <button className="btn btn-icon btn-danger" title="Verwijderen" onClick={() => onDelete(risk)}>🗑</button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// Score input grid
+function ScoreGrid({ prefix, values, onChange }) {
+  return (
+    <div className="scores-grid">
+      {SCORE_LABELS.map((label, i) => {
+        const key = prefix === 'i' ? SCORE_KEYS_I[i] : SCORE_KEYS_R[i];
+        const val = values[key] || '';
+        return (
+          <div key={key} className="score-input-card">
+            <div className="score-input-label">{label}</div>
+            <input
+              type="number" min="0" max="7"
+              value={val}
+              onChange={e => onChange(key, Math.min(7, Math.max(0, parseInt(e.target.value) || 0)))}
+              className={scoreClass(val)}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Risk editor
+function RiskEditor({ risk, onSave, onCancel, nextNum }) {
+  const isNew = !risk?.id;
+  const [form, setForm] = useState(risk || {
+    volgnummer: nextNum,
+    gebeurtenis: '', oorzaken: '', gevolgen: '', beheersmaatregelen: '',
+    kans_i: 0, tijd_i: 0, geld_i: 0, kwaliteit_i: 0, veiligheid_i: 0, omgeving_i: 0,
+    kans_r: 0, tijd_r: 0, geld_r: 0, kwaliteit_r: 0, veiligheid_r: 0, omgeving_r: 0,
+    eigenaar: '', status: 'Concept', fase: '', allocatie: '', actiehouder: '', toelichting: '',
+    opmerking: ''
+  });
+  const [tab, setTab] = useState('omschrijving');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const runAI = async () => {
+    if (!form.gebeurtenis.trim()) { showToast('Voer eerst een ongewenste gebeurtenis in', 'error'); return; }
+    setAiLoading(true);
+    try {
+      const result = await analyzeRisk(form.gebeurtenis);
+      setForm(f => ({
+        ...f,
+        oorzaken: result.oorzaken || f.oorzaken,
+        gevolgen: result.gevolgen || f.gevolgen,
+        beheersmaatregelen: result.beheer || f.beheersmaatregelen,
+        kans_i: result.kans_i ?? f.kans_i,
+        tijd_i: result.tijd_i ?? f.tijd_i,
+        geld_i: result.geld_i ?? f.geld_i,
+        kwaliteit_i: result.kwaliteit_i ?? f.kwaliteit_i,
+        veiligheid_i: result.veiligheid_i ?? f.veiligheid_i,
+        omgeving_i: result.omgeving_i ?? f.omgeving_i,
+        opmerking: result.toelichting ? `AI-toelichting: ${result.toelichting}` : f.opmerking
+      }));
+      showToast('AI-analyse klaar — controleer en pas aan waar nodig', 'success');
+      setTab('omschrijving');
+    } catch (e) { showToast('AI-fout: ' + e.message, 'error'); }
+    setAiLoading(false);
+  };
+
+  const save = async () => {
+    if (!form.gebeurtenis?.trim()) { showToast('Ongewenste gebeurtenis is verplicht', 'error'); return; }
+    setSaving(true);
+    try { await onSave(form); }
+    catch (e) { showToast('Fout: ' + e.message, 'error'); }
+    setSaving(false);
+  };
+
+  const si = riskScore(form, 'i');
+  const sr = riskScore(form, 'r');
+
+  return (
+    <div>
+      <div className="back-btn" onClick={onCancel}>← Terug naar overzicht</div>
+      <div className="panel">
+        <div className="panel-header">
+          <div>
+            <span style={{fontFamily:'var(--mono)',color:'var(--text3)',fontSize:'12px'}}>#{form.volgnummer}</span>
+            <div className="panel-title">{isNew ? 'Nieuw risico' : 'Risico bewerken'}</div>
+          </div>
+          <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
+            {si > 0 && <span style={{fontSize:'12px',color:'var(--text2)'}}>I: <span className={`score-pill ${scoreClass(si)}`}>{si}</span></span>}
+            {sr > 0 && <span style={{fontSize:'12px',color:'var(--text2)'}}>R: <span className={`score-pill ${scoreClass(sr)}`}>{sr}</span></span>}
+          </div>
+        </div>
+        <div className="panel-body">
+          {/* Gebeurtenis always visible */}
+          <div className="form-group" style={{marginBottom:'14px'}}>
+            <label>Ongewenste gebeurtenis *</label>
+            <textarea
+              value={form.gebeurtenis}
+              onChange={e => set('gebeurtenis', e.target.value)}
+              placeholder="Beschrijf de ongewenste gebeurtenis..."
+              rows={2}
+            />
+          </div>
+          <div style={{marginBottom:'16px'}}>
+            <button className="ai-btn" onClick={runAI} disabled={aiLoading}>
+              {aiLoading ? <><div className="ai-spinner"/><span>Analyseren...</span></> : <><span>✦</span><span>AI-analyse genereren</span></>}
+            </button>
+            <span style={{fontSize:'11px',color:'var(--text3)',marginLeft:'10px'}}>Vult oorzaken, gevolgen, maatregelen en scores in</span>
+          </div>
+
+          <div className="tabs">
+            {['omschrijving','scores','beheersing','details'].map(t => (
+              <div key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
+                {t.charAt(0).toUpperCase() + t.slice(1)}
+              </div>
+            ))}
+          </div>
+
+          {tab === 'omschrijving' && (
+            <div className="form-grid">
+              <div className="form-group">
+                <label>Oorzaken</label>
+                <textarea value={form.oorzaken} onChange={e => set('oorzaken', e.target.value)} rows={4} placeholder="1. Oorzaak één&#10;2. Oorzaak twee" />
+              </div>
+              <div className="form-group">
+                <label>Gevolgen</label>
+                <textarea value={form.gevolgen} onChange={e => set('gevolgen', e.target.value)} rows={4} placeholder="1. Gevolg één&#10;2. Gevolg twee" />
+              </div>
+              <div className="form-group">
+                <label>Opmerking / toelichting</label>
+                <textarea value={form.opmerking} onChange={e => set('opmerking', e.target.value)} rows={3} />
+              </div>
+            </div>
+          )}
+
+          {tab === 'scores' && (
+            <div>
+              <div className="scores-section">
+                <div className="scores-label">Initiële scores (voor beheersing)</div>
+                <ScoreGrid prefix="i" values={form} onChange={set} />
+              </div>
+              <hr className="divider" />
+              <div className="scores-section">
+                <div className="scores-label">Restrisico scores (na beheersing)</div>
+                <ScoreGrid prefix="r" values={form} onChange={set} />
+              </div>
+            </div>
+          )}
+
+          {tab === 'beheersing' && (
+            <div className="form-grid">
+              <div className="form-group">
+                <label>Beheersmaatregelen</label>
+                <textarea value={form.beheersmaatregelen} onChange={e => set('beheersmaatregelen', e.target.value)} rows={5} placeholder="1. Maatregel één&#10;2. Maatregel twee" />
+              </div>
+              <div className="form-grid form-grid-2">
+                <div className="form-group">
+                  <label>Actiehouder</label>
+                  <input value={form.actiehouder} onChange={e => set('actiehouder', e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label>Deadline</label>
+                  <input type="date" value={form.deadline || ''} onChange={e => set('deadline', e.target.value)} />
+                </div>
+              </div>
+              <div className="form-group">
+                <label>Opmerkingen beheersing</label>
+                <textarea value={form.toelichting} onChange={e => set('toelichting', e.target.value)} rows={3} />
+              </div>
+            </div>
+          )}
+
+          {tab === 'details' && (
+            <div className="form-grid form-grid-2">
+              <div className="form-group">
+                <label>Status</label>
+                <select value={form.status} onChange={e => set('status', e.target.value)}>
+                  {STATUS_LIST.map(s => <option key={s}>{s}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Fase</label>
+                <select value={form.fase || ''} onChange={e => set('fase', e.target.value)}>
+                  <option value="">—</option>
+                  {FASE_LIST.map(f => <option key={f}>{f}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Risico-eigenaar</label>
+                <input value={form.eigenaar} onChange={e => set('eigenaar', e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label>Allocatie</label>
+                <select value={form.allocatie || ''} onChange={e => set('allocatie', e.target.value)}>
+                  <option value="">—</option>
+                  {ALLOC_LIST.map(a => <option key={a}>{a}</option>)}
+                </select>
+              </div>
+            </div>
+          )}
+
+          <hr className="divider" />
+          <div style={{display:'flex',gap:'8px'}}>
+            <button className="btn btn-primary" onClick={save} disabled={saving}>
+              {saving ? 'Opslaan...' : isNew ? 'Risico toevoegen' : 'Wijzigingen opslaan'}
+            </button>
+            <button className="btn btn-secondary" onClick={onCancel}>Annuleren</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Dashboard
+function Dashboard({ risks, project }) {
+  const total = risks.length;
+  const open = risks.filter(r => !['Vervallen','Beheerst'].includes(r.status)).length;
+  const opgetreden = risks.filter(r => r.status === 'Opgetreden').length;
+  const highRisk = risks.filter(r => riskScore(r, 'r') >= 25 || riskScore(r, 'i') >= 35).length;
+
+  const statusCounts = STATUS_LIST.reduce((acc, s) => {
+    acc[s] = risks.filter(r => r.status === s).length;
+    return acc;
+  }, {});
+
+  const topRisks = [...risks]
+    .filter(r => riskScore(r, 'i') > 0)
+    .sort((a, b) => riskScore(b, 'i') - riskScore(a, 'i'))
+    .slice(0, 5);
+
+  return (
+    <div>
+      <div style={{marginBottom:'20px'}}>
+        <h2 style={{fontSize:'18px',fontWeight:600}}>{project?.naam || 'Dashboard'}</h2>
+        {project?.nummer && <span style={{fontFamily:'var(--mono)',color:'var(--text3)',fontSize:'12px'}}>{project.nummer}</span>}
+      </div>
+      <div className="stats-grid">
+        <div className="stat-card"><div className="stat-value">{total}</div><div className="stat-label">Totaal risico's</div></div>
+        <div className="stat-card"><div className="stat-value" style={{color:'var(--yellow)'}}>{open}</div><div className="stat-label">Open risico's</div></div>
+        <div className="stat-card"><div className="stat-value" style={{color:'var(--red)'}}>{opgetreden}</div><div className="stat-label">Opgetreden</div></div>
+        <div className="stat-card"><div className="stat-value" style={{color:'var(--orange)'}}>{highRisk}</div><div className="stat-label">Hoog risico</div></div>
+      </div>
+
+      {topRisks.length > 0 && (
+        <div className="card">
+          <div className="card-title">Top risico's — initieel</div>
+          <table className="risk-table">
+            <thead>
+              <tr>
+                <th style={{width:40}}>ID</th>
+                <th>Gebeurtenis</th>
+                <th style={{width:70}}>Score</th>
+                <th style={{width:90}}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topRisks.map(r => (
+                <tr key={r.id}>
+                  <td className="col-id">{r.volgnummer}</td>
+                  <td><div className="event-text">{r.gebeurtenis}</div></td>
+                  <td><span className={`score-pill ${scoreClass(riskScore(r,'i'))}`}>{riskScore(r,'i')}</span></td>
+                  <td><span className={`badge ${statusClass(r.status)}`}>{r.status}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="card">
+        <div className="card-title">Status verdeling</div>
+        <div style={{display:'flex',flexWrap:'wrap',gap:'8px'}}>
+          {STATUS_LIST.map(s => (
+            <div key={s} style={{minWidth:'100px',background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:'6px',padding:'10px 14px'}}>
+              <div style={{fontSize:'20px',fontFamily:'var(--mono)',fontWeight:600}}>{statusCounts[s]}</div>
+              <div style={{fontSize:'11px',color:'var(--text2)',marginTop:'2px'}}>{s}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Risk list
+function RiskList({ risks, onAdd, onEdit, onDelete }) {
+  const [search, setSearch] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+
+  const filtered = risks.filter(r => {
+    const q = search.toLowerCase();
+    const matchSearch = !q || (r.gebeurtenis || '').toLowerCase().includes(q) || String(r.volgnummer).includes(q) || (r.eigenaar || '').toLowerCase().includes(q);
+    const matchStatus = !filterStatus || r.status === filterStatus;
+    return matchSearch && matchStatus;
+  });
+
+  return (
+    <div>
+      <div className="risk-toolbar">
+        <div className="risk-toolbar-left">
+          <input className="search-input" placeholder="Zoeken..." value={search} onChange={e => setSearch(e.target.value)} />
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{width:'130px'}}>
+            <option value="">Alle statussen</option>
+            {STATUS_LIST.map(s => <option key={s}>{s}</option>)}
+          </select>
+        </div>
+        <button className="btn btn-primary" onClick={onAdd}>+ Nieuw risico</button>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="empty">
+          <div className="empty-icon">📋</div>
+          <p>{risks.length === 0 ? 'Nog geen risico\'s. Voeg het eerste toe.' : 'Geen risico\'s gevonden.'}</p>
+          {risks.length === 0 && <button className="btn btn-primary" onClick={onAdd}>+ Eerste risico toevoegen</button>}
+        </div>
+      ) : (
+        <div className="table-wrap">
+          <table className="risk-table">
+            <thead>
+              <tr>
+                <th className="col-id">ID</th>
+                <th>Ongewenste gebeurtenis</th>
+                <th className="col-status">Status</th>
+                <th className="col-score">Initieel</th>
+                <th className="col-score">Restrisico</th>
+                <th className="col-actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(r => (
+                <RiskRow key={r.id} risk={r} onEdit={onEdit} onDelete={onDelete} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Excel export
+function exportToExcel(project, risks) {
+  const wb = XLSX.utils.book_new();
+
+  // ---- Sheet 1: RISICOREGISTER ----
+  const wsData = [];
+
+  // Header info
+  wsData.push(['','','','','Project', project?.naam || '']);
+  wsData.push(['','','','','TSB (conform BTO)', parseFloat(project?.tsb) || 0]);
+  wsData.push(['','','','','Projectgrootte (zie tabel)', (parseFloat(project?.tsb)||0) < 5000000 ? 'Klein project' : (parseFloat(project?.tsb)||0) <= 12000000 ? 'Middelgroot' : 'Groot']);
+  wsData.push(['','','','','Opsteller', project?.opsteller || '']);
+  wsData.push(['','','','','Datum laatste actualisatie', project?.datum_actualisatie || '']);
+  wsData.push([]);
+  wsData.push([]);
+
+  // Column headers
+  wsData.push([
+    '','ID','Deelproject','Ongewenste gebeurtenis','Oorzaak(en)','Gevolg(en)','Opmerking risico',
+    'Status risico','Risico-eigenaar','Allocatie','Fase',
+    'Kans','Tijd','Geld','Kwaliteit','Veiligheid','Omgeving','Risico',
+    'Beheersmaatregel','Actiehouder','Deadline','Opmerkingen',
+    'Kans','Tijd','Geld','Kwaliteit','Veiligheid','Omgeving','Risico'
+  ]);
+
+  // Data rows
+  risks.forEach(r => {
+    const si = riskScore(r, 'i');
+    const sr = riskScore(r, 'r');
+    wsData.push([
+      '',
+      r.volgnummer,
+      '',
+      r.gebeurtenis || '',
+      r.oorzaken || '',
+      r.gevolgen || '',
+      r.opmerking || '',
+      r.status || 'Concept',
+      r.eigenaar || '',
+      r.allocatie || '',
+      r.fase || '',
+      r.kans_i || '',
+      r.tijd_i || '',
+      r.geld_i || '',
+      r.kwaliteit_i || '',
+      r.veiligheid_i || '',
+      r.omgeving_i || '',
+      si || '',
+      r.beheersmaatregelen || '',
+      r.actiehouder || '',
+      r.deadline || '',
+      r.toelichting || '',
+      r.kans_r || '',
+      r.tijd_r || '',
+      r.geld_r || '',
+      r.kwaliteit_r || '',
+      r.veiligheid_r || '',
+      r.omgeving_r || '',
+      sr || ''
+    ]);
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols'] = [
+    {wch:2},{wch:6},{wch:14},{wch:40},{wch:40},{wch:40},{wch:30},
+    {wch:12},{wch:18},{wch:12},{wch:12},
+    {wch:6},{wch:6},{wch:6},{wch:8},{wch:8},{wch:8},{wch:8},
+    {wch:40},{wch:18},{wch:12},{wch:30},
+    {wch:6},{wch:6},{wch:6},{wch:8},{wch:8},{wch:8},{wch:8}
+  ];
+  XLSX.utils.book_append_sheet(wb, ws, 'RISICOREGISTER');
+
+  // ---- Sheet 2: KWANTIFICEERTABELLEN ----
+  const kwData = [
+    ['Kwantificeertabel Kleine projecten'],
+    [5000000],
+    ['Schaal','Kans','Tijd','Geld','Kwaliteit','Veiligheid','Omgeving','Rekenwaarde kans','Rekenwaarde kosten'],
+    [0,'0','Geen impact','Geen impact','Geen impact','Geen impact','Geen impact',0,0],
+    [1,'< 5 %','< 0.5 week','< € 5.000','Vragen binnen projectteam','Gering incident, geen EHBO','Interne aandacht',0.05,2500],
+    [2,'5-15%','0.5 - 1 weken','€ 5.000 - €10.000','Onderzoek nodig, voldoet aan specs','EHBO nodig','Lokale media',0.1,7500],
+    [3,'15-25%','1 - 2 weken','€ 10.000 - € 25.000','Wijkt af van afspraak, voldoet aan functie','Arts nodig','Sectoronrust',0.2,17500],
+    [4,'25-35%','2 - 4 weken','€ 25.000 - € 50.000','Aanpassing/herstel mogelijk','Grote impact, verzuim','Regionale media',0.3,37500],
+    [5,'35-45%','4 - 6 weken','€ 50.000 - € 75.000','Herstel zichtbaar, extra controles','Verzuim >7 weken','Nationale media beperkt',0.4,67500],
+    [6,'45-55%','6 - 8 weken','€ 75.000 - € 100.000','Aanpassing specs nodig','Blijvend letsel','Nationale media aanzienlijk',0.5,87500],
+    [7,'55-85%','> 2 maanden','> € 100.000','Niet herstelbaar','Dodelijk','Internationaal',0.7,100000],
+  ];
+  const ws2 = XLSX.utils.aoa_to_sheet(kwData);
+  XLSX.utils.book_append_sheet(wb, ws2, 'KWANTIFICEERTABELLEN');
+
+  const fname = `Risicodossier_${(project?.naam || 'export').replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`;
+  XLSX.writeFile(wb, fname);
+  showToast('Excel geëxporteerd: ' + fname, 'success');
+}
+
+// Main App
+function App() {
+  const [page, setPage] = useState('dashboard');
+  const [project, setProject] = useState(null);
+  const [risks, setRisks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editingRisk, setEditingRisk] = useState(null);
+  const [showEditor, setShowEditor] = useState(false);
+
+  // Load project
+  useEffect(() => {
+    (async () => {
+      try {
+        const projects = await sbFetch('/risico_projecten?order=created_at.desc&limit=1');
+        if (projects?.length > 0) {
+          setProject(projects[0]);
+          const r = await sbFetch(`/risico_items?project_id=eq.${projects[0].id}&order=volgnummer.asc`);
+          setRisks(r || []);
+        }
+      } catch (e) { showToast('Verbindingsfout: ' + e.message, 'error'); }
+      setLoading(false);
+    })();
+  }, []);
+
+  const loadRisks = async (pid) => {
+    const r = await sbFetch(`/risico_items?project_id=eq.${pid}&order=volgnummer.asc`);
+    setRisks(r || []);
+  };
+
+  const handleProjectSave = async (p) => {
+    setProject(p);
+    if (p?.id) loadRisks(p.id);
+  };
+
+  const handleAddRisk = () => {
+    setEditingRisk(null);
+    setShowEditor(true);
+    setPage('risicos');
+  };
+
+  const handleEditRisk = (r) => {
+    setEditingRisk(r);
+    setShowEditor(true);
+    setPage('risicos');
+  };
+
+  const handleSaveRisk = async (form) => {
+    if (!project?.id) { showToast('Stel eerst een project in', 'error'); return; }
+    const payload = { ...form, project_id: project.id };
+    let result;
+    if (form.id) {
+      result = await sbFetch(`/risico_items?id=eq.${form.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+    } else {
+      result = await sbFetch('/risico_items', { method: 'POST', body: JSON.stringify(payload) });
+    }
+    await loadRisks(project.id);
+    setShowEditor(false);
+    setEditingRisk(null);
+    showToast('Risico opgeslagen', 'success');
+  };
+
+  const handleDeleteRisk = async (r) => {
+    if (!window.confirm(`Risico #${r.volgnummer} verwijderen?`)) return;
+    await sbFetch(`/risico_items?id=eq.${r.id}`, { method: 'DELETE', prefer: '' });
+    setRisks(rs => rs.filter(x => x.id !== r.id));
+    showToast('Risico verwijderd');
+  };
+
+  const nextNum = risks.length > 0 ? Math.max(...risks.map(r => r.volgnummer || 0)) + 1 : 1;
+
+  if (loading) {
+    return (
+      <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',color:'var(--text2)',gap:'12px'}}>
+        <div style={{width:'20px',height:'20px',border:'2px solid var(--border2)',borderTopColor:'var(--accent)',borderRadius:'50%',animation:'spin 0.8s linear infinite'}} />
+        Laden...
+      </div>
+    );
+  }
+
+  const navItems = [
+    { id: 'dashboard', label: 'Dashboard', icon: '◈' },
+    { id: 'risicos', label: "Risico's", icon: '⚑' },
+    { id: 'project', label: 'Project', icon: '⊙' },
+  ];
+
+  return (
+    <div className="app">
+      <div className="topbar">
+        <div className="topbar-left">
+          <div className="logo">RISICODOSSIER</div>
+          {project && <div className="project-badge">{project.naam}{project.nummer ? ` · ${project.nummer}` : ''}</div>}
+        </div>
+        <div className="topbar-right">
+          {project && (
+            <button className="btn btn-success btn-sm" onClick={() => exportToExcel(project, risks)}>
+              ↓ Excel exporteren
+            </button>
+          )}
+          <button className="btn btn-primary btn-sm" onClick={handleAddRisk}>+ Risico</button>
+        </div>
+      </div>
+      <div className="main">
+        <div className="sidebar">
+          {navItems.map(n => (
+            <div
+              key={n.id}
+              className={`nav-item ${page === n.id && !showEditor ? 'active' : ''}`}
+              onClick={() => { setPage(n.id); setShowEditor(false); }}
+            >
+              <span className="nav-icon">{n.icon}</span>
+              {n.label}
+              {n.id === 'risicos' && risks.filter(r => !['Vervallen','Beheerst'].includes(r.status)).length > 0 && (
+                <span style={{marginLeft:'auto',fontSize:'11px',fontFamily:'var(--mono)',color:'var(--text3)'}}>
+                  {risks.filter(r => !['Vervallen','Beheerst'].includes(r.status)).length}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="content">
+          {/* Dashboard */}
+          {page === 'dashboard' && !showEditor && (
+            <Dashboard risks={risks} project={project} />
+          )}
+
+          {/* Risk list / editor */}
+          {page === 'risicos' && (
+            showEditor ? (
+              <RiskEditor
+                risk={editingRisk}
+                nextNum={nextNum}
+                onSave={handleSaveRisk}
+                onCancel={() => { setShowEditor(false); setEditingRisk(null); }}
+              />
+            ) : (
+              <RiskList
+                risks={risks}
+                onAdd={handleAddRisk}
+                onEdit={handleEditRisk}
+                onDelete={handleDeleteRisk}
+              />
+            )
+          )}
+
+          {/* Project settings */}
+          {page === 'project' && !showEditor && (
+            <ProjectSetup project={project} onSave={handleProjectSave} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.render(<App />, document.getElementById('app'));
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+</body>
+</html>
