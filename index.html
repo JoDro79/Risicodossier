@@ -896,8 +896,25 @@ function ImportPage({ project, onDone, nextNum, risks }) {
       // Mark running
       setRows(r => r.map((row, idx) => idx === i ? { ...row, status: 'running' } : row));
 
+      let ai = null;
+      let lastError = '';
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          if (attempt > 0) await new Promise(res => setTimeout(res, 3000 * attempt));
+          ai = await analyzeRisk(rows[i].text);
+          break;
+        } catch (e) {
+          lastError = e.message;
+        }
+      }
+
+      if (!ai) {
+        setRows(r => r.map((row, idx) => idx === i ? { ...row, status: 'error', msg: lastError } : row));
+        setProgress(Math.round(((i + 1) / rows.length) * 100));
+        continue;
+      }
+
       try {
-        const ai = await analyzeRisk(rows[i].text);
         const payload = {
           project_id: project.id,
           volgnummer: currentNext + i,
@@ -918,7 +935,7 @@ function ImportPage({ project, onDone, nextNum, risks }) {
           veiligheid_r: ai.veiligheid_r ?? 0,
           omgeving_r: ai.omgeving_r ?? 0,
           status: 'Concept',
-          opmerking: ai.toelichting ? `AI: ${ai.toelichting}` : ''
+          opmerking: ai.toelichting || ''
         };
         await sbFetch('/risico_items', { method: 'POST', body: JSON.stringify(payload) });
         setRows(r => r.map((row, idx) => idx === i ? { ...row, status: 'done', msg: `Score: ${(ai.kans_i||0) * Math.max(ai.tijd_i||0, ai.geld_i||0)}` } : row));
@@ -926,6 +943,8 @@ function ImportPage({ project, onDone, nextNum, risks }) {
         setRows(r => r.map((row, idx) => idx === i ? { ...row, status: 'error', msg: e.message } : row));
       }
       setProgress(Math.round(((i + 1) / rows.length) * 100));
+      // Pauze tussen aanroepen om Gemini niet te overbelasten
+      if (i < rows.length - 1) await new Promise(res => setTimeout(res, 1500));
     }
     setImporting(false);
     setDone(true);
