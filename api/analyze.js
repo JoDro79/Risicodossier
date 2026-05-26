@@ -30,10 +30,12 @@ export default async function handler(req, res) {
   };
 
   const extractJson = (text) => {
-    const first = text.indexOf('{');
-    const last = text.lastIndexOf('}');
+    // Strip any markdown code fences first
+    const cleaned = text.replace(/`+\s*json\s*/gi, '').replace(/`+/g, '').trim();
+    const first = cleaned.indexOf('{');
+    const last = cleaned.lastIndexOf('}');
     if (first === -1 || last === -1 || last <= first) return null;
-    try { return JSON.parse(text.slice(first, last + 1)); } catch { return null; }
+    try { return JSON.parse(cleaned.slice(first, last + 1)); } catch { return null; }
   };
 
   try {
