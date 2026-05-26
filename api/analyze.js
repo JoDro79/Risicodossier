@@ -53,7 +53,25 @@ Geef ALLEEN geldige JSON, geen markdown, geen uitleg, geen backticks:
     try {
       parsed = JSON.parse(clean);
     } catch (e) {
-      return res.status(502).json({ error: `JSON parse fout: ${clean.slice(0, 200)}` });
+      // Try to extract JSON object from the response
+      const match = clean.match(/\{[\s\S]*\}/);
+      if (match) {
+        try {
+          parsed = JSON.parse(match[0]);
+        } catch (e2) {
+          return res.status(502).json({ error: `JSON parse fout: ${clean.slice(0, 300)}` });
+        }
+      } else {
+        return res.status(502).json({ error: `Geen JSON gevonden: ${clean.slice(0, 300)}` });
+      }
+    }
+
+    // Normalize array fields to newline-separated strings
+    const textFields = ['oorzaken', 'gevolgen', 'beheer', 'toelichting'];
+    for (const field of textFields) {
+      if (Array.isArray(parsed[field])) {
+        parsed[field] = parsed[field].map((v, i) => `${i + 1}. ${v}`).join('\n');
+      }
     }
 
     return res.status(200).json(parsed);
