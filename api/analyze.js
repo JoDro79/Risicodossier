@@ -47,23 +47,22 @@ Geef ALLEEN geldige JSON, geen markdown, geen uitleg, geen backticks:
 
     const data = await response.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    const clean = text.replace(/```json|```/g, '').trim();
-
+    
+    // Aggressively extract JSON - find first { and last }
+    const firstBrace = text.indexOf('{');
+    const lastBrace = text.lastIndexOf('}');
+    
+    if (firstBrace === -1 || lastBrace === -1) {
+      return res.status(502).json({ error: `Geen JSON in response: ${text.slice(0, 200)}` });
+    }
+    
+    const jsonStr = text.slice(firstBrace, lastBrace + 1);
+    
     let parsed;
     try {
-      parsed = JSON.parse(clean);
+      parsed = JSON.parse(jsonStr);
     } catch (e) {
-      // Try to extract JSON object from the response
-      const match = clean.match(/\{[\s\S]*\}/);
-      if (match) {
-        try {
-          parsed = JSON.parse(match[0]);
-        } catch (e2) {
-          return res.status(502).json({ error: `JSON parse fout: ${clean.slice(0, 300)}` });
-        }
-      } else {
-        return res.status(502).json({ error: `Geen JSON gevonden: ${clean.slice(0, 300)}` });
-      }
+      return res.status(502).json({ error: `JSON parse fout: ${jsonStr.slice(0, 200)}` });
     }
 
     // Normalize array fields to newline-separated strings
