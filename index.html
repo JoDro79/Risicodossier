@@ -106,6 +106,7 @@
   .badge-concept { background: rgba(90,107,133,0.2); color: var(--text3); }
   .badge-voorstel { background: rgba(240,180,41,0.15); color: var(--yellow); }
   .badge-vigerend { background: rgba(59,127,255,0.15); color: var(--accent); }
+  .badge-actueel { background: rgba(249,115,22,0.15); color: var(--orange); }
   .badge-beheerst { background: rgba(34,201,122,0.15); color: var(--green); }
   .badge-vervallen { background: rgba(90,107,133,0.12); color: var(--text3); }
   .badge-opgetreden { background: rgba(240,82,82,0.15); color: var(--red); }
@@ -229,13 +230,14 @@ const SUPABASE_URL = 'https://hjizveuklymmobqzsglb.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhqaXp2ZXVrbHltbW9icXpzZ2xiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNTkyNjAsImV4cCI6MjA5MjczNTI2MH0.PRyNwCicqg1IaYe7-QlGIGmHljFpaYdel4tmLVGD5vU';
 const AI_MODEL = 'claude-sonnet-4-20250514';
 
-const STATUS_LIST = ['Concept','Voorstel','Vigerend','Beheerst','Vervallen','Opgetreden'];
+const STATUS_LIST = ['Concept','Voorstel','Vigerend','Actueel','Beheerst','Vervallen','Opgetreden'];
 const FASE_LIST = ['Bouwteam','Uitvoering','NAOK','Ontwerp'];
 const ALLOC_LIST = ['Bouwteam','Liander','A.Hak'];
 
 const SCORE_LABELS = ['Kans','Tijd','Geld','Kwaliteit','Veiligheid','Omgeving'];
 const SCORE_KEYS_I = ['kans_i','tijd_i','geld_i','kwaliteit_i','veiligheid_i','omgeving_i'];
 const SCORE_KEYS_R = ['kans_r','tijd_r','geld_r','kwaliteit_r','veiligheid_r','omgeving_r'];
+const SCORE_KEYS_A = ['kans_a','tijd_a','geld_a','kwaliteit_a','veiligheid_a','omgeving_a'];
 
 // Supabase helpers
 async function sbFetch(path, opts = {}) {
@@ -377,6 +379,9 @@ function RiskRow({ risk, onEdit, onDelete }) {
       <td className="col-score">
         {sr > 0 ? <span className={`score-pill ${scoreClass(sr)}`}>{sr}</span> : <span style={{color:'var(--text3)'}}>—</span>}
       </td>
+      <td className="col-score">
+        {(() => { const sa = riskScore(risk, 'a'); return sa > 0 ? <span className={`score-pill ${scoreClass(sa)}`}>{sa}</span> : <span style={{color:'var(--text3)'}}>—</span>; })()}
+      </td>
       <td className="col-actions">
         <div className="row-actions">
           <button className="btn btn-icon btn-secondary" title="Bewerken" onClick={() => onEdit(risk)}>✏️</button>
@@ -392,7 +397,7 @@ function ScoreGrid({ prefix, values, onChange }) {
   return (
     <div className="scores-grid">
       {SCORE_LABELS.map((label, i) => {
-        const key = prefix === 'i' ? SCORE_KEYS_I[i] : SCORE_KEYS_R[i];
+        const key = prefix === 'i' ? SCORE_KEYS_I[i] : prefix === 'r' ? SCORE_KEYS_R[i] : SCORE_KEYS_A[i];
         const val = values[key] || '';
         return (
           <div key={key} className="score-input-card">
@@ -418,6 +423,7 @@ function RiskEditor({ risk, onSave, onCancel, nextNum }) {
     gebeurtenis: '', oorzaken: '', gevolgen: '', beheersmaatregelen: '',
     kans_i: 0, tijd_i: 0, geld_i: 0, kwaliteit_i: 0, veiligheid_i: 0, omgeving_i: 0,
     kans_r: 0, tijd_r: 0, geld_r: 0, kwaliteit_r: 0, veiligheid_r: 0, omgeving_r: 0,
+    kans_a: 0, tijd_a: 0, geld_a: 0, kwaliteit_a: 0, veiligheid_a: 0, omgeving_a: 0,
     eigenaar: '', status: 'Concept', fase: '', allocatie: '', actiehouder: '', toelichting: '',
     opmerking: ''
   });
@@ -535,6 +541,11 @@ function RiskEditor({ risk, onSave, onCancel, nextNum }) {
               <div className="scores-section">
                 <div className="scores-label">Restrisico scores (na beheersing)</div>
                 <ScoreGrid prefix="r" values={form} onChange={set} />
+              </div>
+              <hr className="divider" />
+              <div className="scores-section">
+                <div className="scores-label">Actuele scores (huidige stand)</div>
+                <ScoreGrid prefix="a" values={form} onChange={set} />
               </div>
             </div>
           )}
@@ -716,6 +727,7 @@ function RiskList({ risks, onAdd, onEdit, onDelete }) {
                 <th className="col-status">Status</th>
                 <th className="col-score">Initieel</th>
                 <th className="col-score">Restrisico</th>
+                <th className="col-score">Actueel</th>
                 <th className="col-actions"></th>
               </tr>
             </thead>
@@ -753,13 +765,15 @@ function exportToExcel(project, risks) {
     'Status risico','Risico-eigenaar','Allocatie','Fase',
     'Kans','Tijd','Geld','Kwaliteit','Veiligheid','Omgeving','Risico',
     'Beheersmaatregel','Actiehouder','Deadline','Opmerkingen',
-    'Kans','Tijd','Geld','Kwaliteit','Veiligheid','Omgeving','Risico'
+    'Kans','Tijd','Geld','Kwaliteit','Veiligheid','Omgeving','Risico',
+    'Kans actueel','Tijd actueel','Geld actueel','Kwaliteit actueel','Veiligheid actueel','Omgeving actueel','Risico actueel'
   ]);
 
   // Data rows
   risks.forEach(r => {
     const si = riskScore(r, 'i');
     const sr = riskScore(r, 'r');
+    const sa = riskScore(r, 'a');
     wsData.push([
       '',
       r.volgnummer,
@@ -789,7 +803,14 @@ function exportToExcel(project, risks) {
       r.kwaliteit_r || '',
       r.veiligheid_r || '',
       r.omgeving_r || '',
-      sr || ''
+      sr || '',
+      r.kans_a || '',
+      r.tijd_a || '',
+      r.geld_a || '',
+      r.kwaliteit_a || '',
+      r.veiligheid_a || '',
+      r.omgeving_a || '',
+      sa || ''
     ]);
   });
 
