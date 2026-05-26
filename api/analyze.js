@@ -1,12 +1,17 @@
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  const { gebeurtenis } = req.body;
-  if (!gebeurtenis) {
-    return res.status(400).json({ error: 'Geen gebeurtenis opgegeven' });
-  }
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY niet ingesteld in Vercel' });
+
+  const { gebeurtenis } = req.body || {};
+  if (!gebeurtenis) return res.status(400).json({ error: 'Geen gebeurtenis opgegeven' });
 
   const systemPrompt = `Je bent een risico-expert voor kabelinstallatie-projecten van A.Hak Electron in Nederland (Liander/Alliander netbeheer). Projecten betreffen laagspanning, middenspanning, hoogspanning, glasvezel en datacommunicatie. Perceeleigenaren, ZRO-processen, GR-procedures, vergunningen, HDD-boringen en MSR-plaatsingen zijn gangbare onderwerpen.
 
@@ -18,7 +23,7 @@ Analyseer de opgegeven ongewenste gebeurtenis voor een klein project (TSB < €5
 - Veiligheid: 0=geen, 1=gering geen EHBO, 2=gering EHBO, 3=arts nodig, 4=grote impact verzuim, 5=verzuim>7wk, 6=blijvend letsel, 7=dodelijk
 - Omgeving: 0=geen, 1=intern, 2=lokale media, 3=sectoronrust, 4=regionaal, 5=nationaal beperkt, 6=nationaal aanzienlijk, 7=internationaal
 
-Geef ALLEEN JSON, geen markdown:
+Geef ALLEEN geldige JSON, geen markdown, geen uitleg:
 {"oorzaken":"genummerde lijst oorzaken","gevolgen":"genummerde lijst gevolgen","beheer":"genummerde lijst beheersmaatregelen","kans_i":0,"tijd_i":0,"geld_i":0,"kwaliteit_i":0,"veiligheid_i":0,"omgeving_i":0,"toelichting":"1-2 zinnen onderbouwing scores"}`;
 
   try {
@@ -26,7 +31,7 @@ Geef ALLEEN JSON, geen markdown:
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'x-api-key': apiKey,
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
@@ -37,12 +42,24 @@ Geef ALLEEN JSON, geen markdown:
       })
     });
 
+    if (!response.ok) {
+      const errText = await response.text();
+      return res.status(502).json({ error: `Anthropic API fout ${response.status}: ${errText}` });
+    }
+
     const data = await response.json();
-    const text = data.content?.filter(b => b.type === 'text').map(b => b.text).join('');
+    const text = data.content?.filter(b => b.type === 'text').map(b => b.text).join('') || '';
     const clean = text.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(clean);
-    res.status(200).json(parsed);
+
+    let parsed;
+    try {
+      parsed = JSON.parse(clean);
+    } catch (e) {
+      return res.status(502).json({ error: `JSON parse fout: ${clean.slice(0, 200)}` });
+    }
+
+    return res.status(200).json(parsed);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: e.message });
   }
 }
