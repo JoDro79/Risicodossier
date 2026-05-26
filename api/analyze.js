@@ -35,7 +35,11 @@ Geef ALLEEN geldige JSON, geen markdown, geen uitleg, geen backticks:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 1000 }
+          generationConfig: { 
+            temperature: 0.2, 
+            maxOutputTokens: 2048,
+            responseMimeType: 'application/json'
+          }
         })
       }
     );
@@ -48,12 +52,18 @@ Geef ALLEEN geldige JSON, geen markdown, geen uitleg, geen backticks:
     const data = await response.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     
+    // Log for debugging
+    console.log('Gemini raw response:', JSON.stringify(data).slice(0, 500));
+    console.log('Extracted text:', text.slice(0, 500));
+    
     // Aggressively extract JSON - find first { and last }
     const firstBrace = text.indexOf('{');
     const lastBrace = text.lastIndexOf('}');
     
+    console.log('firstBrace:', firstBrace, 'lastBrace:', lastBrace, 'textLength:', text.length);
+    
     if (firstBrace === -1 || lastBrace === -1) {
-      return res.status(502).json({ error: `Geen JSON in response: ${text.slice(0, 200)}` });
+      return res.status(502).json({ error: `Geen JSON in response: ${text.slice(0, 200)}`, raw: JSON.stringify(data).slice(0, 500) });
     }
     
     const jsonStr = text.slice(firstBrace, lastBrace + 1);
