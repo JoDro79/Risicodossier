@@ -443,7 +443,13 @@ function RiskEditor({ risk, onSave, onCancel, nextNum }) {
         kwaliteit_i: result.kwaliteit_i ?? f.kwaliteit_i,
         veiligheid_i: result.veiligheid_i ?? f.veiligheid_i,
         omgeving_i: result.omgeving_i ?? f.omgeving_i,
-        opmerking: result.toelichting ? `AI-toelichting: ${result.toelichting}` : f.opmerking
+        kans_r: result.kans_r ?? f.kans_r,
+        tijd_r: result.tijd_r ?? f.tijd_r,
+        geld_r: result.geld_r ?? f.geld_r,
+        kwaliteit_r: result.kwaliteit_r ?? f.kwaliteit_r,
+        veiligheid_r: result.veiligheid_r ?? f.veiligheid_r,
+        omgeving_r: result.omgeving_r ?? f.omgeving_r,
+        opmerking: result.toelichting || f.opmerking
       }));
       showToast('AI-analyse klaar — controleer en pas aan waar nodig', 'success');
       setTab('omschrijving');
@@ -884,7 +890,12 @@ function ImportPage({ project, onDone, nextNum, risks }) {
           kwaliteit_i: ai.kwaliteit_i || 0,
           veiligheid_i: ai.veiligheid_i || 0,
           omgeving_i: ai.omgeving_i || 0,
-          kans_r: 0, tijd_r: 0, geld_r: 0, kwaliteit_r: 0, veiligheid_r: 0, omgeving_r: 0,
+          kans_r: ai.kans_r ?? 0,
+          tijd_r: ai.tijd_r ?? 0,
+          geld_r: ai.geld_r ?? 0,
+          kwaliteit_r: ai.kwaliteit_r ?? 0,
+          veiligheid_r: ai.veiligheid_r ?? 0,
+          omgeving_r: ai.omgeving_r ?? 0,
           status: 'Concept',
           opmerking: ai.toelichting ? `AI: ${ai.toelichting}` : ''
         };
