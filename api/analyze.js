@@ -22,13 +22,13 @@ Analyseer de opgegeven ongewenste gebeurtenis voor een klein project (TSB < €5
 - Veiligheid: 0=geen, 1=gering geen EHBO, 2=gering EHBO, 3=arts nodig, 4=grote impact verzuim, 5=verzuim>7wk, 6=blijvend letsel, 7=dodelijk
 - Omgeving: 0=geen, 1=intern, 2=lokale media, 3=sectoronrust, 4=regionaal, 5=nationaal beperkt, 6=nationaal aanzienlijk, 7=internationaal
 
-Geef de TOP 3 oorzaken, TOP 3 gevolgen en TOP 3 beheersmaatregelen (niet meer, niet minder).
+Geef de TOP 3 oorzaken, TOP 3 gevolgen en TOP 3 beheersmaatregelen. Houd elke punt KORT (max 10 woorden per punt).
 Voor restrisico: schat de scores NA uitvoering van de beheersmaatregelen (typisch 1-2 punten lager dan initieel, minimaal 0).
 
 Analyseer dit risico: "${gebeurtenis}"
 
-Geef ALLEEN geldige JSON, geen markdown, geen uitleg, geen backticks:
-{"oorzaken":"1. ...\n2. ...\n3. ...","gevolgen":"1. ...\n2. ...\n3. ...","beheer":"1. ...\n2. ...\n3. ...","kans_i":0,"tijd_i":0,"geld_i":0,"kwaliteit_i":0,"veiligheid_i":0,"omgeving_i":0,"kans_r":0,"tijd_r":0,"geld_r":0,"kwaliteit_r":0,"veiligheid_r":0,"omgeving_r":0,"toelichting":"1-2 zinnen onderbouwing scores"}`;
+Geef ALLEEN deze JSON zonder enige andere tekst, markdown of uitleg:
+{"oorzaken":"1. kort\n2. kort\n3. kort","gevolgen":"1. kort\n2. kort\n3. kort","beheer":"1. kort\n2. kort\n3. kort","kans_i":0,"tijd_i":0,"geld_i":0,"kwaliteit_i":0,"veiligheid_i":0,"omgeving_i":0,"kans_r":0,"tijd_r":0,"geld_r":0,"kwaliteit_r":0,"veiligheid_r":0,"omgeving_r":0,"toelichting":"max 20 woorden"}`;
 
   try {
     const response = await fetch(
@@ -39,9 +39,8 @@ Geef ALLEEN geldige JSON, geen markdown, geen uitleg, geen backticks:
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: { 
-            temperature: 0.2, 
-            maxOutputTokens: 2048,
-            responseMimeType: 'application/json'
+            temperature: 0.1, 
+            maxOutputTokens: 2048
           }
         })
       }
