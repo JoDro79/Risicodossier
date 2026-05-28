@@ -744,7 +744,21 @@ function RiskList({ risks, onAdd, onEdit, onDelete }) {
 }
 
 // Excel export
-function exportToExcel(project, risks) {
+async function exportToExcel(project, risks) {
+  if (!project?.id) { showToast('Geen project geselecteerd', 'error'); return; }
+  showToast('Export wordt voorbereid...');
+
+  // Always fetch fresh data from Supabase
+  let exportRisks = risks;
+  try {
+    const fresh = await sbFetch(`/risico_items?project_id=eq.${project.id}&order=volgnummer.asc`);
+    if (fresh && fresh.length > 0) exportRisks = fresh;
+  } catch(e) { /* gebruik gecachede risico's */ }
+
+  if (!exportRisks || exportRisks.length === 0) {
+    showToast("Geen risico's om te exporteren", 'error');
+    return;
+  }
   const wb = XLSX.utils.book_new();
 
   // ---- Sheet 1: RISICOREGISTER ----
