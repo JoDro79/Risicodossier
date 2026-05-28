@@ -271,11 +271,31 @@ function scoreClass(v) {
 }
 
 // Composite risk score
+// Correct risico formula: Kans × SOM(Tijd+Geld+Kwaliteit+Veiligheid+Omgeving)
 function riskScore(r, prefix) {
   const k = r[`kans_${prefix}`] || 0;
   const t = r[`tijd_${prefix}`] || 0;
   const g = r[`geld_${prefix}`] || 0;
-  return k * Math.max(t, g);
+  const kw = r[`kwaliteit_${prefix}`] || 0;
+  const v = r[`veiligheid_${prefix}`] || 0;
+  const o = r[`omgeving_${prefix}`] || 0;
+  return k * (t + g + kw + v + o);
+}
+
+// Kwantificeertabel kleine projecten
+const KANS_REKENWAARDE = [0, 0.05, 0.10, 0.20, 0.30, 0.40, 0.50, 0.70];
+const GELD_REKENWAARDE = [0, 2500, 7500, 17500, 37500, 67500, 87500, 100000];
+const TIJD_TEKST = ['Geen impact','< 0.5 week','0.5 - 1 week','1 - 2 weken','2 - 4 weken','4 - 6 weken','6 - 8 weken','> 2 maanden'];
+
+function berekenRestrisico(r, prefix) {
+  const kans = r[`kans_${prefix}`] || 0;
+  const geld = r[`geld_${prefix}`] || 0;
+  const tijd = r[`tijd_${prefix}`] || 0;
+  const kansRw = KANS_REKENWAARDE[Math.min(kans, 7)];
+  const geldRw = GELD_REKENWAARDE[Math.min(geld, 7)];
+  const tijdTekst = TIJD_TEKST[Math.min(tijd, 7)];
+  const restrisicoBedrag = kansRw * geldRw;
+  return { kansRw, geldRw, restrisicoBedrag, tijdTekst };
 }
 
 // Status badge class
@@ -547,6 +567,38 @@ function RiskEditor({ risk, onSave, onCancel, nextNum }) {
                 <div className="scores-label">Actuele scores (huidige stand)</div>
                 <ScoreGrid prefix="a" values={form} onChange={set} />
               </div>
+              <hr className="divider" />
+              {/* Berekeningen */}
+              {['i','r','a'].map(prefix => {
+                const score = riskScore(form, prefix);
+                const { kansRw, geldRw, restrisicoBedrag, tijdTekst } = berekenRestrisico(form, prefix);
+                const label = prefix === 'i' ? 'Initieel' : prefix === 'r' ? 'Restrisico' : 'Actueel';
+                if (!score) return null;
+                return (
+                  <div key={prefix} style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:'6px',padding:'12px 16px',marginBottom:'8px'}}>
+                    <div style={{fontSize:'11px',color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:'8px'}}>{label} — Berekening</div>
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'8px'}}>
+                      <div>
+                        <div style={{fontSize:'11px',color:'var(--text3)'}}>Risicoscore</div>
+                        <div style={{fontFamily:'var(--mono)',fontSize:'18px',fontWeight:600,color:'var(--text)'}}>{score}</div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:'11px',color:'var(--text3)'}}>Kans%</div>
+                        <div style={{fontFamily:'var(--mono)',fontSize:'18px',fontWeight:600,color:'var(--text)'}}>{Math.round(kansRw*100)}%</div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:'11px',color:'var(--text3)'}}>Rekenwaarde kosten</div>
+                        <div style={{fontFamily:'var(--mono)',fontSize:'14px',fontWeight:600,color:'var(--text)'}}>€ {geldRw.toLocaleString('nl-NL')}</div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:'11px',color:'var(--text3)'}}>Restrisico bedrag</div>
+                        <div style={{fontFamily:'var(--mono)',fontSize:'14px',fontWeight:600,color:'var(--yellow)'}}>€ {restrisicoBedrag.toLocaleString('nl-NL',{maximumFractionDigits:0})}</div>
+                      </div>
+                    </div>
+                    <div style={{marginTop:'8px',fontSize:'12px',color:'var(--text2)'}}>Tijdsimpact: <span style={{color:'var(--text)'}}>{tijdTekst}</span></div>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -743,120 +795,166 @@ function RiskList({ risks, onAdd, onEdit, onDelete }) {
   );
 }
 
-// Excel export
+// Excel export — UMS format met kleuren en gegroepeerde headers
 async function exportToExcel(project, risks) {
   if (!project?.id) { showToast('Geen project geselecteerd', 'error'); return; }
   showToast('Export wordt voorbereid...');
 
-  // Always fetch fresh data from Supabase
   let exportRisks = risks;
   try {
     const fresh = await sbFetch(`/risico_items?project_id=eq.${project.id}&order=volgnummer.asc`);
     if (fresh && fresh.length > 0) exportRisks = fresh;
-  } catch(e) { /* gebruik gecachede risico's */ }
+  } catch(e) {}
 
   if (!exportRisks || exportRisks.length === 0) {
     showToast("Geen risico's om te exporteren", 'error');
     return;
   }
+
   const wb = XLSX.utils.book_new();
+  const ws = {};
+  const merges = [];
 
-  // ---- Sheet 1: RISICOREGISTER ----
-  const wsData = [];
+  // Helper: zet cel met waarde en stijl
+  const C = (r, c) => XLSX.utils.encode_cell({r:r-1, c:c-1});
 
-  // Header info
-  wsData.push(['','','','','Project', project?.naam || '']);
-  wsData.push(['','','','','TSB (conform BTO)', parseFloat(project?.tsb) || 0]);
-  wsData.push(['','','','','Projectgrootte (zie tabel)', (parseFloat(project?.tsb)||0) < 5000000 ? 'Klein project' : (parseFloat(project?.tsb)||0) <= 12000000 ? 'Middelgroot' : 'Groot']);
-  wsData.push(['','','','','Opsteller', project?.opsteller || '']);
-  wsData.push(['','','','','Datum laatste actualisatie', project?.datum_actualisatie || '']);
-  wsData.push([]);
-  wsData.push([]);
+  const setCell = (row, col, value, style) => {
+    const addr = C(row, col);
+    ws[addr] = { v: value, t: typeof value === 'number' ? 'n' : 's', s: style };
+  };
 
-  // Column headers
-  wsData.push([
-    '','ID','Deelproject','Ongewenste gebeurtenis','Oorzaak(en)','Gevolg(en)','Opmerking risico',
-    'Status risico','Risico-eigenaar','Allocatie','Fase',
-    'Kans','Tijd','Geld','Kwaliteit','Veiligheid','Omgeving','Risico',
-    'Beheersmaatregel','Actiehouder','Deadline','Opmerkingen',
-    'Kans','Tijd','Geld','Kwaliteit','Veiligheid','Omgeving','Risico',
-    'Kans actueel','Tijd actueel','Geld actueel','Kwaliteit actueel','Veiligheid actueel','Omgeving actueel','Risico actueel'
-  ]);
+  const merge = (r1, c1, r2, c2) => merges.push({s:{r:r1-1,c:c1-1},e:{r:r2-1,c:c2-1}});
 
-  // Data rows
-  risks.forEach(r => {
-    const si = riskScore(r, 'i');
-    const sr = riskScore(r, 'r');
-    const sa = riskScore(r, 'a');
-    wsData.push([
-      '',
-      r.volgnummer,
-      '',
-      r.gebeurtenis || '',
-      r.oorzaken || '',
-      r.gevolgen || '',
-      r.opmerking || '',
-      r.status || 'Concept',
-      r.eigenaar || '',
-      r.allocatie || '',
-      r.fase || '',
-      r.kans_i || '',
-      r.tijd_i || '',
-      r.geld_i || '',
-      r.kwaliteit_i || '',
-      r.veiligheid_i || '',
-      r.omgeving_i || '',
-      si || '',
-      r.beheersmaatregelen || '',
-      r.actiehouder || '',
-      r.deadline || '',
-      r.toelichting || '',
-      r.kans_r || '',
-      r.tijd_r || '',
-      r.geld_r || '',
-      r.kwaliteit_r || '',
-      r.veiligheid_r || '',
-      r.omgeving_r || '',
-      sr || '',
-      r.kans_a || '',
-      r.tijd_a || '',
-      r.geld_a || '',
-      r.kwaliteit_a || '',
-      r.veiligheid_a || '',
-      r.omgeving_a || '',
-      sa || ''
-    ]);
+  // Stijlen
+  const S = {
+    HDR_GREEN:  { font:{bold:true,color:{rgb:'FFFFFF'},name:'Arial',sz:9}, fill:{fgColor:{rgb:'70AD47'}}, alignment:{horizontal:'center',vertical:'center',wrapText:true} },
+    HDR_CYAN:   { font:{bold:true,color:{rgb:'000000'},name:'Arial',sz:9}, fill:{fgColor:{rgb:'00B0F0'}}, alignment:{horizontal:'center',vertical:'center',wrapText:false} },
+    HDR_SUB:    { font:{bold:true,color:{rgb:'000000'},name:'Arial',sz:9}, fill:{fgColor:{rgb:'92D050'}}, alignment:{horizontal:'center',vertical:'center',wrapText:true} },
+    DATA_W:     { font:{name:'Arial',sz:9}, fill:{fgColor:{rgb:'FFFFFF'}}, alignment:{vertical:'center',wrapText:true} },
+    DATA_G:     { font:{name:'Arial',sz:9}, fill:{fgColor:{rgb:'F2F2F2'}}, alignment:{vertical:'center',wrapText:true} },
+    DATA_WC:    { font:{name:'Arial',sz:9}, fill:{fgColor:{rgb:'FFFFFF'}}, alignment:{horizontal:'center',vertical:'center',wrapText:true} },
+    DATA_GC:    { font:{name:'Arial',sz:9}, fill:{fgColor:{rgb:'F2F2F2'}}, alignment:{horizontal:'center',vertical:'center',wrapText:true} },
+    PINK:       { font:{name:'Arial',sz:9}, fill:{fgColor:{rgb:'FFB6C1'}}, alignment:{horizontal:'center',vertical:'center',wrapText:true} },
+    PINK_EUR:   { font:{name:'Arial',sz:9}, fill:{fgColor:{rgb:'FFB6C1'}}, alignment:{horizontal:'center',vertical:'center',wrapText:true}, numFmt:'€ #,##0' },
+    INFO_LBL:   { font:{bold:true,name:'Arial',sz:9}, alignment:{horizontal:'left',vertical:'center'} },
+    INFO_VAL:   { font:{name:'Arial',sz:9}, alignment:{horizontal:'left',vertical:'center'} },
+    EUR_W:      { font:{name:'Arial',sz:9}, fill:{fgColor:{rgb:'FFFFFF'}}, alignment:{horizontal:'center',vertical:'center'}, numFmt:'€ #,##0' },
+    EUR_G:      { font:{name:'Arial',sz:9}, fill:{fgColor:{rgb:'F2F2F2'}}, alignment:{horizontal:'center',vertical:'center'}, numFmt:'€ #,##0' },
+  };
+
+  // ---- Projectinfo rijen 1-5 ----
+  const tsb = parseFloat(project?.tsb) || 0;
+  const grootte = tsb < 5000000 ? 'Klein project' : tsb <= 12000000 ? 'Middelgroot' : 'Groot';
+  [[1,'Project',project?.naam||''],[2,'TSB (conform BTO)',tsb],[3,'Projectgrootte',grootte],
+   [4,'Opsteller',project?.opsteller||''],[5,'Datum laatste actualisatie',project?.datum_actualisatie||'']
+  ].forEach(([row,lbl,val]) => {
+    setCell(row, 5, lbl, S.INFO_LBL);
+    setCell(row, 6, val, S.INFO_VAL);
   });
 
-  const ws = XLSX.utils.aoa_to_sheet(wsData);
-  ws['!cols'] = [
-    {wch:2},{wch:6},{wch:14},{wch:40},{wch:40},{wch:40},{wch:30},
-    {wch:12},{wch:18},{wch:12},{wch:12},
-    {wch:6},{wch:6},{wch:6},{wch:8},{wch:8},{wch:8},{wch:8},
-    {wch:40},{wch:18},{wch:12},{wch:30},
-    {wch:6},{wch:6},{wch:6},{wch:8},{wch:8},{wch:8},{wch:8}
+  // ---- Rij 7: gegroepeerde headers ----
+  setCell(7, 12, 'INITIEEL', S.HDR_GREEN);           merge(7,12,7,18);
+  setCell(7, 19, 'FINANCIËLE KWANTIFICERING', S.HDR_CYAN); merge(7,19,7,22);
+  setCell(7, 27, 'RESTRISICO', S.HDR_GREEN);          merge(7,27,7,33);
+  setCell(7, 34, 'FINANCIËLE KWANTIFICERING', S.HDR_CYAN); merge(7,34,7,37);
+
+  // ---- Rij 8: kolomkoppen ----
+  const H8 = [
+    [2,'ID'],[3,'Deelproject'],[4,'Ongewenste gebeurtenis'],[5,'Oorzaak(en)'],[6,'Gevolg(en)'],
+    [7,'Opmerking'],[8,'Status'],[9,'Risico-eigenaar'],[10,'Allocatie'],[11,'Fase'],
+    [12,'Kans'],[13,'Tijd'],[14,'Geld'],[15,'Kwaliteit'],[16,'Veiligheid'],[17,'Omgeving'],[18,'Risico'],
+    [19,'Kans'],[20,'Rekenwaarde kosten'],[21,'Restrisico bedrag'],[22,'Tijdsimpact'],
+    [23,'Beheersmaatregel'],[24,'Actiehouder'],[25,'Deadline'],[26,'Opmerkingen'],
+    [27,'Kans'],[28,'Tijd'],[29,'Geld'],[30,'Kwaliteit'],[31,'Veiligheid'],[32,'Omgeving'],[33,'Risico'],
+    [34,'Kans'],[35,'Rekenwaarde kosten'],[36,'Restrisico bedrag'],[37,'Tijdsimpact'],
   ];
+  H8.forEach(([col, lbl]) => setCell(8, col, lbl, S.HDR_SUB));
+
+  // ---- Datarijen vanaf rij 10 ----
+  const HIGH = 30;
+  exportRisks.forEach((r, idx) => {
+    const row = 10 + idx;
+    const even = idx % 2 === 0;
+    const DW = even ? S.DATA_W : S.DATA_G;
+    const DC = even ? S.DATA_WC : S.DATA_GC;
+    const EUR = even ? S.EUR_W : S.EUR_G;
+
+    const si = riskScore(r,'i'), sr = riskScore(r,'r'), sa = riskScore(r,'a');
+    const bI = berekenRestrisico(r,'i'), bR = berekenRestrisico(r,'r');
+    const pi = si >= HIGH, pr = sr >= HIGH;
+    const PS = S.PINK, PE = S.PINK_EUR;
+
+    setCell(row,2,r.volgnummer||'',DC);
+    setCell(row,3,r.deelproject||'',DC);
+    setCell(row,4,r.gebeurtenis||'',DW);
+    setCell(row,5,r.oorzaken||'',DW);
+    setCell(row,6,r.gevolgen||'',DW);
+    setCell(row,7,r.opmerking||'',DW);
+    setCell(row,8,r.status||'Concept',DC);
+    setCell(row,9,r.eigenaar||'',DC);
+    setCell(row,10,r.allocatie||'',DC);
+    setCell(row,11,r.fase||'',DC);
+
+    // Initieel scores
+    ['kans_i','tijd_i','geld_i','kwaliteit_i','veiligheid_i','omgeving_i'].forEach((k,i) => {
+      setCell(row,12+i, r[k]||'', pi?PS:DC);
+    });
+    setCell(row,18,si||'',pi?PS:DC);
+    setCell(row,19,`${Math.round(bI.kansRw*100)}%`,pi?PS:DC);
+    setCell(row,20,bI.geldRw||'',pi?PE:EUR);
+    setCell(row,21,bI.restrisicoBedrag?Math.round(bI.restrisicoBedrag):'',pi?PE:EUR);
+    setCell(row,22,bI.tijdTekst||'',pi?PS:DC);
+
+    setCell(row,23,r.beheersmaatregelen||'',DW);
+    setCell(row,24,r.actiehouder||'',DC);
+    setCell(row,25,r.deadline||'',DC);
+    setCell(row,26,r.toelichting||'',DW);
+
+    // Restrisico scores
+    ['kans_r','tijd_r','geld_r','kwaliteit_r','veiligheid_r','omgeving_r'].forEach((k,i) => {
+      setCell(row,27+i, r[k]||'', pr?PS:DC);
+    });
+    setCell(row,33,sr||'',pr?PS:DC);
+    setCell(row,34,`${Math.round(bR.kansRw*100)}%`,pr?PS:DC);
+    setCell(row,35,bR.geldRw||'',pr?PE:EUR);
+    setCell(row,36,bR.restrisicoBedrag?Math.round(bR.restrisicoBedrag):'',pr?PE:EUR);
+    setCell(row,37,bR.tijdTekst||'',pr?PS:DC);
+  });
+
+  // Sheet range en merges
+  ws['!ref'] = XLSX.utils.encode_range({s:{r:0,c:0},e:{r:9+exportRisks.length,c:36}});
+  ws['!merges'] = merges;
+  ws['!cols'] = [
+    {wch:2},{wch:6},{wch:12},{wch:40},{wch:35},{wch:35},{wch:25},
+    {wch:12},{wch:16},{wch:12},{wch:12},
+    {wch:6},{wch:6},{wch:6},{wch:8},{wch:8},{wch:8},{wch:8},
+    {wch:8},{wch:14},{wch:14},{wch:14},
+    {wch:35},{wch:14},{wch:12},{wch:25},
+    {wch:6},{wch:6},{wch:6},{wch:8},{wch:8},{wch:8},{wch:8},
+    {wch:8},{wch:14},{wch:14},{wch:14},
+  ];
+  ws['!rows'] = Array(9+exportRisks.length).fill(null).map((_,i) => ({hpt: i===7?36:i===6?18:45}));
+
   XLSX.utils.book_append_sheet(wb, ws, 'RISICOREGISTER');
 
-  // ---- Sheet 2: KWANTIFICEERTABELLEN ----
+  // Sheet 2: KWANTIFICEERTABELLEN
   const kwData = [
-    ['Kwantificeertabel Kleine projecten'],
-    [5000000],
+    ['Kwantificeertabel Kleine projecten','',5000000],
     ['Schaal','Kans','Tijd','Geld','Kwaliteit','Veiligheid','Omgeving','Rekenwaarde kans','Rekenwaarde kosten'],
     [0,'0','Geen impact','Geen impact','Geen impact','Geen impact','Geen impact',0,0],
     [1,'< 5 %','< 0.5 week','< € 5.000','Vragen binnen projectteam','Gering incident, geen EHBO','Interne aandacht',0.05,2500],
-    [2,'5-15%','0.5 - 1 weken','€ 5.000 - €10.000','Onderzoek nodig, voldoet aan specs','EHBO nodig','Lokale media',0.1,7500],
-    [3,'15-25%','1 - 2 weken','€ 10.000 - € 25.000','Wijkt af van afspraak, voldoet aan functie','Arts nodig','Sectoronrust',0.2,17500],
-    [4,'25-35%','2 - 4 weken','€ 25.000 - € 50.000','Aanpassing/herstel mogelijk','Grote impact, verzuim','Regionale media',0.3,37500],
-    [5,'35-45%','4 - 6 weken','€ 50.000 - € 75.000','Herstel zichtbaar, extra controles','Verzuim >7 weken','Nationale media beperkt',0.4,67500],
-    [6,'45-55%','6 - 8 weken','€ 75.000 - € 100.000','Aanpassing specs nodig','Blijvend letsel','Nationale media aanzienlijk',0.5,87500],
-    [7,'55-85%','> 2 maanden','> € 100.000','Niet herstelbaar','Dodelijk','Internationaal',0.7,100000],
+    [2,'5-15%','0.5 - 1 weken','€ 5.000 - €10.000','Onderzoek nodig','EHBO nodig','Lokale media',0.10,7500],
+    [3,'15-25%','1 - 2 weken','€ 10.000 - € 25.000','Wijkt af van afspraak','Arts nodig','Sectoronrust',0.20,17500],
+    [4,'25-35%','2 - 4 weken','€ 25.000 - € 50.000','Aanpassing/herstel mogelijk','Grote impact verzuim','Regionale media',0.30,37500],
+    [5,'35-45%','4 - 6 weken','€ 50.000 - € 75.000','Herstel zichtbaar','Verzuim >7 weken','Nationale media beperkt',0.40,67500],
+    [6,'45-55%','6 - 8 weken','€ 75.000 - € 100.000','Aanpassing specs nodig','Blijvend letsel','Nationale media aanzienlijk',0.50,87500],
+    [7,'55-85%','> 2 maanden','> € 100.000','Niet herstelbaar','Dodelijk','Internationaal',0.70,100000],
   ];
   const ws2 = XLSX.utils.aoa_to_sheet(kwData);
   XLSX.utils.book_append_sheet(wb, ws2, 'KWANTIFICEERTABELLEN');
 
-  const fname = `Risicodossier_${(project?.naam || 'export').replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`;
-  XLSX.writeFile(wb, fname);
+  const fname = `Risicodossier_${(project?.naam||'export').replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`;
+  XLSX.writeFile(wb, fname, { cellStyles: true });
   showToast('Excel geëxporteerd: ' + fname, 'success');
 }
 
@@ -876,15 +974,15 @@ function ImportPage({ project, onDone, nextNum, risks }) {
       const wb = XLSX.read(e.target.result, { type: 'array' });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
-      // Collect non-empty strings from first column, skip header if it looks like one
-      const texts = data
-        .map(r => String(r[0] || '').trim())
-        .filter(t => t.length > 0);
-      // Skip first row if it looks like a header (no digits, short)
-      const start = (texts.length > 0 && /^[a-zA-Z\s]+$/.test(texts[0]) && texts[0].length < 40) ? 1 : 0;
-      const events = texts.slice(start);
+      // Collect rows: first column = gebeurtenis, optional second column = status
+      const rows = data
+        .filter(r => String(r[0] || '').trim().length > 0)
+        .map(r => ({ text: String(r[0] || '').trim(), status: String(r[1] || '').trim() || 'Concept' }));
+      // Skip header row if first cell looks like a header
+      const start = (rows.length > 0 && /^[a-zA-Z\s]+$/.test(rows[0].text) && rows[0].text.length < 40) ? 1 : 0;
+      const events = rows.slice(start);
       if (events.length === 0) { showToast('Geen regels gevonden in het bestand', 'error'); return; }
-      setRows(events.map(t => ({ text: t, status: 'waiting', msg: '' })));
+      setRows(events.map(t => ({ text: t.text, status: t.status, status_import: t.status, importStatus: 'waiting', msg: '' })));
       setDone(false);
       setProgress(0);
     };
@@ -908,7 +1006,7 @@ function ImportPage({ project, onDone, nextNum, risks }) {
     for (let i = 0; i < rows.length; i++) {
       if (abortRef.current) break;
       // Mark running
-      setRows(r => r.map((row, idx) => idx === i ? { ...row, status: 'running' } : row));
+      setRows(r => r.map((row, idx) => idx === i ? { ...row, importStatus: 'running' } : row));
 
       let ai = null;
       let lastError = '';
@@ -923,12 +1021,16 @@ function ImportPage({ project, onDone, nextNum, risks }) {
       }
 
       if (!ai) {
-        setRows(r => r.map((row, idx) => idx === i ? { ...row, status: 'error', msg: lastError } : row));
+        setRows(r => r.map((row, idx) => idx === i ? { ...row, importStatus: 'error', msg: lastError } : row));
         setProgress(Math.round(((i + 1) / rows.length) * 100));
         continue;
       }
 
       try {
+        const validStatuses = ['Concept','Voorstel','Vigerend','Actueel','Beheerst','Vervallen','Opgetreden'];
+        const importedStatus = rows[i].status_import;
+        const status = validStatuses.includes(importedStatus) ? importedStatus : 'Concept';
+        const scoreI = (ai.kans_i||0) * ((ai.tijd_i||0)+(ai.geld_i||0)+(ai.kwaliteit_i||0)+(ai.veiligheid_i||0)+(ai.omgeving_i||0));
         const payload = {
           project_id: project.id,
           volgnummer: currentNext + i,
@@ -948,16 +1050,15 @@ function ImportPage({ project, onDone, nextNum, risks }) {
           kwaliteit_r: ai.kwaliteit_r ?? 0,
           veiligheid_r: ai.veiligheid_r ?? 0,
           omgeving_r: ai.omgeving_r ?? 0,
-          status: 'Concept',
+          status,
           opmerking: ai.toelichting || ''
         };
         await sbFetch('/risico_items', { method: 'POST', body: JSON.stringify(payload) });
-        setRows(r => r.map((row, idx) => idx === i ? { ...row, status: 'done', msg: `Score: ${(ai.kans_i||0) * Math.max(ai.tijd_i||0, ai.geld_i||0)}` } : row));
+        setRows(r => r.map((row, idx) => idx === i ? { ...row, importStatus: 'done', msg: `Score: ${scoreI}` } : row));
       } catch (e) {
-        setRows(r => r.map((row, idx) => idx === i ? { ...row, status: 'error', msg: e.message } : row));
+        setRows(r => r.map((row, idx) => idx === i ? { ...row, importStatus: 'error', msg: e.message } : row));
       }
       setProgress(Math.round(((i + 1) / rows.length) * 100));
-      // Pauze tussen aanroepen om Gemini niet te overbelasten
       if (i < rows.length - 1) await new Promise(res => setTimeout(res, 1500));
     }
     setImporting(false);
@@ -1026,12 +1127,12 @@ function ImportPage({ project, onDone, nextNum, risks }) {
             {rows.map((row, i) => (
               <div key={i} className="import-row">
                 <div className="import-row-num">#{i + 1}</div>
-                <div className="import-row-text">{row.text}</div>
+                <div className="import-row-text">{row.text}{row.status_import && row.status_import !== 'Concept' && <span style={{marginLeft:'6px',fontSize:'11px',color:'var(--text3)'}}>({row.status_import})</span>}</div>
                 <div className="import-row-status">
-                  {row.status === 'waiting' && <span className="import-status-waiting">Wacht</span>}
-                  {row.status === 'running' && <span className="import-status-running"><div className="ai-spinner"/>Analyseren</span>}
-                  {row.status === 'done' && <span className="import-status-done">✓ {row.msg}</span>}
-                  {row.status === 'error' && <span className="import-status-error">✗ Fout</span>}
+                  {row.importStatus === 'waiting' && <span className="import-status-waiting">Wacht</span>}
+                  {row.importStatus === 'running' && <span className="import-status-running"><div className="ai-spinner"/>Analyseren</span>}
+                  {row.importStatus === 'done' && <span className="import-status-done">✓ {row.msg}</span>}
+                  {row.importStatus === 'error' && <span className="import-status-error">✗ Fout</span>}
                 </div>
               </div>
             ))}
