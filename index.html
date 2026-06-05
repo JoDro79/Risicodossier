@@ -1251,7 +1251,11 @@ function App() {
         </div>
         <div className="topbar-right">
           {project && (
-            <button className="btn btn-success btn-sm" onClick={() => exportToExcel(project, risks)}>
+            <button className="btn btn-success btn-sm" onClick={() => {
+              if (!project?.id) { showToast('Geen project geselecteerd', 'error'); return; }
+              showToast('Export wordt voorbereid...');
+              window.location.href = `/api/export?project_id=${project.id}`;
+            }}>
               ↓ Excel exporteren
             </button>
           )}
