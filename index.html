@@ -960,146 +960,207 @@ async function exportToExcel(project, risks) {
 
 // Import page
 function ImportPage({ project, onDone, nextNum, risks }) {
-  const [rows, setRows] = useState([]);        // { text, status: 'waiting'|'running'|'done'|'error', msg }
+  const [tab, setTab] = useState('bulk');
+  const [rows, setRows] = useState([]);
   const [importing, setImporting] = useState(false);
   const [done, setDone] = useState(false);
   const [progress, setProgress] = useState(0);
   const fileRef = useRef();
+  const dossierRef = useRef();
   const abortRef = useRef(false);
 
-  const handleFile = (file) => {
+  const handleBulkFile = (file) => {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (e) => {
       const wb = XLSX.read(e.target.result, { type: 'array' });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
-      // Collect rows: first column = gebeurtenis, optional second column = status
-      const rows = data
+      const parsed = data
         .filter(r => String(r[0] || '').trim().length > 0)
-        .map(r => ({ text: String(r[0] || '').trim(), status: String(r[1] || '').trim() || 'Concept' }));
-      // Skip header row if first cell looks like a header
-      const start = (rows.length > 0 && /^[a-zA-Z\s]+$/.test(rows[0].text) && rows[0].text.length < 40) ? 1 : 0;
-      const events = rows.slice(start);
-      if (events.length === 0) { showToast('Geen regels gevonden in het bestand', 'error'); return; }
-      setRows(events.map(t => ({ text: t.text, status: t.status, status_import: t.status, importStatus: 'waiting', msg: '' })));
-      setDone(false);
-      setProgress(0);
+        .map(r => ({ text: String(r[0] || '').trim(), status_import: String(r[1] || '').trim() || 'Concept' }));
+      const start = (parsed.length > 0 && /^[a-zA-Z\s]+$/.test(parsed[0].text) && parsed[0].text.length < 40) ? 1 : 0;
+      const events = parsed.slice(start);
+      if (events.length === 0) { showToast('Geen regels gevonden', 'error'); return; }
+      setRows(events.map(t => ({ ...t, mode: 'bulk', importStatus: 'waiting', msg: '' })));
+      setDone(false); setProgress(0);
     };
     reader.readAsArrayBuffer(file);
   };
 
-  const handleDrop = (e) => {
-    e.preventDefault();
-    e.currentTarget.classList.remove('drag-over');
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
+  const handleDossierFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const sheetName = wb.SheetNames.find(n => n.includes('RISICO')) || wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+      let headerRow = -1;
+      for (let i = 0; i < Math.min(data.length, 15); i++) {
+        if (data[i].some(c => String(c).includes('Ongewenste') || String(c) === 'ID')) { headerRow = i; break; }
+      }
+      if (headerRow === -1) { showToast('Geen herkenbare kolomkoppen gevonden', 'error'); return; }
+
+      const headers = data[headerRow].map(h => String(h).trim().toLowerCase());
+      const col = (name) => headers.findIndex(h => h.includes(name));
+      const COL = {
+        geb: data[headerRow].findIndex(h => String(h).toLowerCase().includes('ongewenste')),
+        oor: col('oorzaak'), gev: col('gevolg'), opm: col('opmerking risico'),
+        status: col('status'), eigenaar: col('eigenaar'), alloc: col('allocatie'), fase: col('fase'),
+        deelp: col('deelproject'),
+      };
+
+      const faseIdx = COL.fase > 0 ? COL.fase : 10;
+      let kans_i=-1,tijd_i=-1,geld_i=-1,kwal_i=-1,veil_i=-1,omg_i=-1;
+      let kans_r=-1,tijd_r=-1,geld_r=-1,kwal_r=-1,veil_r=-1,omg_r=-1;
+      let beheer=-1,actiehouder=-1,toelichting=-1;
+
+      for (let c = faseIdx+1; c < headers.length; c++) {
+        const h = headers[c];
+        if (kans_i===-1 && h.includes('kans')) kans_i=c;
+        else if (kans_i!==-1 && tijd_i===-1 && h.includes('tijd')) tijd_i=c;
+        else if (tijd_i!==-1 && geld_i===-1 && h.includes('geld')) geld_i=c;
+        else if (geld_i!==-1 && kwal_i===-1 && h.includes('kwaliteit')) kwal_i=c;
+        else if (kwal_i!==-1 && veil_i===-1 && h.includes('veiligheid')) veil_i=c;
+        else if (veil_i!==-1 && omg_i===-1 && h.includes('omgeving')) { omg_i=c; break; }
+      }
+      for (let c = omg_i+1; c < headers.length; c++) {
+        const h = headers[c];
+        if (beheer===-1 && (h.includes('beheersmaatregel')||h.includes('maatregel'))) beheer=c;
+        if (actiehouder===-1 && h.includes('actiehouder')) actiehouder=c;
+        if (toelichting===-1 && (h.includes('opmerkingen')||h.includes('toelichting'))) toelichting=c;
+      }
+      for (let c = (beheer>0?beheer:omg_i)+1; c < headers.length; c++) {
+        const h = headers[c];
+        if (kans_r===-1 && h.includes('kans')) kans_r=c;
+        else if (kans_r!==-1 && tijd_r===-1 && h.includes('tijd')) tijd_r=c;
+        else if (tijd_r!==-1 && geld_r===-1 && h.includes('geld')) geld_r=c;
+        else if (geld_r!==-1 && kwal_r===-1 && h.includes('kwaliteit')) kwal_r=c;
+        else if (kwal_r!==-1 && veil_r===-1 && h.includes('veiligheid')) veil_r=c;
+        else if (veil_r!==-1 && omg_r===-1 && h.includes('omgeving')) { omg_r=c; break; }
+      }
+
+      const VALID = ['Concept','Voorstel','Vigerend','Actueel','Beheerst','Vervallen','Opgetreden'];
+      const num = (v) => { const n = parseInt(v); return isNaN(n) ? null : n; };
+      const str = (v) => String(v||'').trim();
+
+      const parsed = [];
+      for (let i = headerRow+1; i < data.length; i++) {
+        const row = data[i];
+        const geb = str(row[COL.geb]);
+        if (!geb || geb === '0') continue;
+        const status = VALID.includes(str(row[COL.status])) ? str(row[COL.status]) : 'Concept';
+        parsed.push({
+          mode: 'dossier', text: geb, status_import: status,
+          deelproject: str(row[COL.deelp]), oorzaken: str(row[COL.oor]), gevolgen: str(row[COL.gev]),
+          opmerking: str(row[COL.opm]), eigenaar: str(row[COL.eigenaar]),
+          allocatie: str(row[COL.alloc]), fase: str(row[COL.fase]),
+          kans_i: num(row[kans_i]), tijd_i: num(row[tijd_i]), geld_i: num(row[geld_i]),
+          kwaliteit_i: num(row[kwal_i]), veiligheid_i: num(row[veil_i]), omgeving_i: num(row[omg_i]),
+          beheersmaatregelen: str(row[beheer]), actiehouder: str(row[actiehouder]), toelichting: str(row[toelichting]),
+          kans_r: num(row[kans_r]), tijd_r: num(row[tijd_r]), geld_r: num(row[geld_r]),
+          kwaliteit_r: num(row[kwal_r]), veiligheid_r: num(row[veil_r]), omgeving_r: num(row[omg_r]),
+          importStatus: 'waiting', msg: ''
+        });
+      }
+      if (parsed.length === 0) { showToast("Geen risico's gevonden in het dossier", 'error'); return; }
+      setRows(parsed); setDone(false); setProgress(0);
+      showToast(`${parsed.length} risico's ingelezen`, 'success');
+    };
+    reader.readAsArrayBuffer(file);
   };
 
   const runImport = async () => {
     if (!project?.id) { showToast('Stel eerst een project in', 'error'); return; }
     if (rows.length === 0) return;
-    setImporting(true);
-    abortRef.current = false;
+    setImporting(true); abortRef.current = false;
     let currentNext = nextNum;
 
     for (let i = 0; i < rows.length; i++) {
       if (abortRef.current) break;
-      // Mark running
       setRows(r => r.map((row, idx) => idx === i ? { ...row, importStatus: 'running' } : row));
+      const row = rows[i];
+      const needsAI = row.mode === 'bulk' || (!row.oorzaken && !row.gevolgen) || row.kans_i === null;
 
       let ai = null;
-      let lastError = '';
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          if (attempt > 0) await new Promise(res => setTimeout(res, 3000 * attempt));
-          ai = await analyzeRisk(rows[i].text);
-          break;
-        } catch (e) {
-          lastError = e.message;
+      if (needsAI) {
+        let lastError = '';
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            if (attempt > 0) await new Promise(res => setTimeout(res, 3000 * attempt));
+            ai = await analyzeRisk(row.text); break;
+          } catch (e) { lastError = e.message; }
+        }
+        if (!ai) {
+          setRows(r => r.map((row, idx) => idx === i ? { ...row, importStatus: 'error', msg: lastError } : row));
+          setProgress(Math.round(((i+1)/rows.length)*100)); continue;
         }
       }
 
-      if (!ai) {
-        setRows(r => r.map((row, idx) => idx === i ? { ...row, importStatus: 'error', msg: lastError } : row));
-        setProgress(Math.round(((i + 1) / rows.length) * 100));
-        continue;
-      }
-
       try {
-        const validStatuses = ['Concept','Voorstel','Vigerend','Actueel','Beheerst','Vervallen','Opgetreden'];
-        const importedStatus = rows[i].status_import;
-        const status = validStatuses.includes(importedStatus) ? importedStatus : 'Concept';
-        const scoreI = (ai.kans_i||0) * ((ai.tijd_i||0)+(ai.geld_i||0)+(ai.kwaliteit_i||0)+(ai.veiligheid_i||0)+(ai.omgeving_i||0));
-        const payload = {
-          project_id: project.id,
-          volgnummer: currentNext + i,
-          gebeurtenis: rows[i].text,
-          oorzaken: ai.oorzaken || '',
-          gevolgen: ai.gevolgen || '',
-          beheersmaatregelen: ai.beheer || '',
-          kans_i: ai.kans_i || 0,
-          tijd_i: ai.tijd_i || 0,
-          geld_i: ai.geld_i || 0,
-          kwaliteit_i: ai.kwaliteit_i || 0,
-          veiligheid_i: ai.veiligheid_i || 0,
-          omgeving_i: ai.omgeving_i || 0,
-          kans_r: ai.kans_r ?? 0,
-          tijd_r: ai.tijd_r ?? 0,
-          geld_r: ai.geld_r ?? 0,
-          kwaliteit_r: ai.kwaliteit_r ?? 0,
-          veiligheid_r: ai.veiligheid_r ?? 0,
-          omgeving_r: ai.omgeving_r ?? 0,
-          status,
-          opmerking: ai.toelichting || ''
-        };
-        await sbFetch('/risico_items', { method: 'POST', body: JSON.stringify(payload) });
-        setRows(r => r.map((row, idx) => idx === i ? { ...row, importStatus: 'done', msg: `Score: ${scoreI}` } : row));
+        const VALID = ['Concept','Voorstel','Vigerend','Actueel','Beheerst','Vervallen','Opgetreden'];
+        const status = VALID.includes(row.status_import) ? row.status_import : 'Concept';
+        const ki = row.kans_i ?? ai?.kans_i ?? 0;
+        const ti = row.tijd_i ?? ai?.tijd_i ?? 0;
+        const gi = row.geld_i ?? ai?.geld_i ?? 0;
+        const kwi = row.kwaliteit_i ?? ai?.kwaliteit_i ?? 0;
+        const vi = row.veiligheid_i ?? ai?.veiligheid_i ?? 0;
+        const oi = row.omgeving_i ?? ai?.omgeving_i ?? 0;
+        const scoreI = ki * (ti + gi + kwi + vi + oi);
+        await sbFetch('/risico_items', { method: 'POST', body: JSON.stringify({
+          project_id: project.id, volgnummer: currentNext + i,
+          gebeurtenis: row.text,
+          oorzaken: row.oorzaken || ai?.oorzaken || '',
+          gevolgen: row.gevolgen || ai?.gevolgen || '',
+          beheersmaatregelen: row.beheersmaatregelen || ai?.beheer || '',
+          opmerking: row.opmerking || ai?.toelichting || '',
+          toelichting: row.toelichting || '',
+          eigenaar: row.eigenaar || '', allocatie: row.allocatie || '',
+          fase: row.fase || '', deelproject: row.deelproject || '',
+          actiehouder: row.actiehouder || '', status,
+          kans_i: ki, tijd_i: ti, geld_i: gi, kwaliteit_i: kwi, veiligheid_i: vi, omgeving_i: oi,
+          kans_r: row.kans_r ?? ai?.kans_r ?? 0, tijd_r: row.tijd_r ?? ai?.tijd_r ?? 0,
+          geld_r: row.geld_r ?? ai?.geld_r ?? 0, kwaliteit_r: row.kwaliteit_r ?? ai?.kwaliteit_r ?? 0,
+          veiligheid_r: row.veiligheid_r ?? ai?.veiligheid_r ?? 0, omgeving_r: row.omgeving_r ?? ai?.omgeving_r ?? 0,
+        })});
+        setRows(r => r.map((row, idx) => idx === i ? { ...row, importStatus: 'done', msg: `${needsAI?'AI · ':''}Score: ${scoreI}` } : row));
       } catch (e) {
         setRows(r => r.map((row, idx) => idx === i ? { ...row, importStatus: 'error', msg: e.message } : row));
       }
-      setProgress(Math.round(((i + 1) / rows.length) * 100));
-      if (i < rows.length - 1) await new Promise(res => setTimeout(res, 1500));
+      setProgress(Math.round(((i+1)/rows.length)*100));
+      if (i < rows.length-1 && needsAI) await new Promise(res => setTimeout(res, 1500));
     }
-    setImporting(false);
-    setDone(true);
+    setImporting(false); setDone(true);
     showToast(`Import klaar — ${rows.length} risico's verwerkt`, 'success');
   };
 
   const reset = () => { setRows([]); setDone(false); setProgress(0); };
 
   return (
-    <div style={{maxWidth:'680px'}}>
-      <div style={{marginBottom:'20px'}}>
-        <h2 style={{fontSize:'18px',fontWeight:600,marginBottom:'4px'}}>Bulk importeren</h2>
-        <p style={{color:'var(--text2)',fontSize:'13px'}}>Upload een Excel met ongewenste gebeurtenissen. De AI analyseert elke regel en vult oorzaken, gevolgen en scores in.</p>
+    <div style={{maxWidth:'700px'}}>
+      <div className="tabs" style={{marginBottom:'20px'}}>
+        <div className={`tab ${tab==='bulk'?'active':''}`} onClick={() => { setTab('bulk'); reset(); }}>Bulk import (nieuwe lijst)</div>
+        <div className={`tab ${tab==='dossier'?'active':''}`} onClick={() => { setTab('dossier'); reset(); }}>Bestaand risicodossier</div>
       </div>
+      <p style={{color:'var(--text2)',fontSize:'13px',marginBottom:'16px'}}>
+        {tab==='bulk' ? 'Upload een Excel met ongewenste gebeurtenissen. Kolom A = gebeurtenis, kolom B = status (optioneel). AI vult de rest in.' : 'Upload een bestaand risicodossier in UMS-format. Bestaande data wordt overgenomen, lege velden worden door AI aangevuld.'}
+      </p>
 
       {rows.length === 0 && (
         <div>
-          <div
-            className="dropzone"
-            onClick={() => fileRef.current.click()}
+          <div className="dropzone"
+            onClick={() => tab==='bulk' ? fileRef.current.click() : dossierRef.current.click()}
             onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }}
             onDragLeave={e => e.currentTarget.classList.remove('drag-over')}
-            onDrop={handleDrop}
-          >
-            <div className="dropzone-icon">📂</div>
-            <p>Klik om een bestand te kiezen, of sleep het hier naartoe</p>
-            <small>Excel (.xlsx, .xls) — eerste kolom = ongewenste gebeurtenissen</small>
+            onDrop={e => { e.preventDefault(); e.currentTarget.classList.remove('drag-over'); const f=e.dataTransfer.files[0]; if(f) tab==='bulk' ? handleBulkFile(f) : handleDossierFile(f); }}>
+            <div className="dropzone-icon">{tab==='dossier'?'📋':'📂'}</div>
+            <p>{tab==='dossier' ? 'Sleep het UMS risicodossier hiernaartoe' : 'Klik om een bestand te kiezen, of sleep het hier'}</p>
+            <small>{tab==='dossier' ? 'Excel (.xlsx) — UMS-PB-K_R-001 format' : 'Excel (.xlsx) — eerste kolom = ongewenste gebeurtenissen'}</small>
           </div>
-          <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={e => handleFile(e.target.files[0])} />
-
-          <div className="card" style={{marginTop:'20px'}}>
-            <div className="card-title">Verwacht format</div>
-            <div style={{background:'var(--bg3)',borderRadius:'6px',padding:'12px 16px',fontFamily:'var(--mono)',fontSize:'12px',color:'var(--text2)'}}>
-              <div style={{color:'var(--text3)',marginBottom:'6px'}}>Kolom A (geen header vereist)</div>
-              <div>ZRO's worden niet tijdig ondertekend</div>
-              <div>MSR zijn niet tijdig geplaatst</div>
-              <div>Beperkingen in de uitvoering</div>
-              <div style={{color:'var(--text3)'}}>...</div>
-            </div>
-          </div>
+          <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={e => handleBulkFile(e.target.files[0])} />
+          <input ref={dossierRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={e => handleDossierFile(e.target.files[0])} />
         </div>
       )}
 
@@ -1108,53 +1169,49 @@ function ImportPage({ project, onDone, nextNum, risks }) {
           {importing || done ? (
             <div className="import-progress">
               <div className="import-progress-label">
-                <span>{done ? 'Klaar' : 'Bezig met analyseren...'}</span>
+                <span>{done ? 'Klaar' : 'Bezig...'}</span>
                 <span style={{fontFamily:'var(--mono)'}}>{progress}%</span>
               </div>
               <div className="prog-bar"><div className="prog-fill" style={{width:`${progress}%`}} /></div>
             </div>
           ) : (
             <div style={{display:'flex',gap:'8px',marginBottom:'16px',alignItems:'center'}}>
-              <button className="ai-btn" onClick={runImport}>
-                <span>✦</span><span>Start AI-analyse ({rows.length} regels)</span>
-              </button>
+              <button className="ai-btn" onClick={runImport}><span>✦</span><span>Start verwerking ({rows.length} risico's)</span></button>
               <button className="btn btn-secondary" onClick={reset}>Ander bestand</button>
-              <span style={{fontSize:'12px',color:'var(--text3)',marginLeft:'4px'}}>Duurt ~{Math.ceil(rows.length * 4)} seconden</span>
+              <span style={{fontSize:'12px',color:'var(--text3)'}}>
+                {tab==='dossier' ? `${rows.filter(r=>!r.oorzaken||r.kans_i===null).length} rijen hebben AI aanvulling nodig` : `~${Math.ceil(rows.length*4)}s`}
+              </span>
             </div>
           )}
-
           <div className="import-preview">
             {rows.map((row, i) => (
               <div key={i} className="import-row">
-                <div className="import-row-num">#{i + 1}</div>
-                <div className="import-row-text">{row.text}{row.status_import && row.status_import !== 'Concept' && <span style={{marginLeft:'6px',fontSize:'11px',color:'var(--text3)'}}>({row.status_import})</span>}</div>
+                <div className="import-row-num">#{i+1}</div>
+                <div className="import-row-text">
+                  {row.text}
+                  {row.status_import && row.status_import !== 'Concept' && <span style={{marginLeft:'6px',fontSize:'11px',color:'var(--text3)'}}>({row.status_import})</span>}
+                  {row.fase && <span style={{marginLeft:'6px',fontSize:'11px',color:'var(--accent)'}}>{row.fase}</span>}
+                </div>
                 <div className="import-row-status">
-                  {row.importStatus === 'waiting' && <span className="import-status-waiting">Wacht</span>}
-                  {row.importStatus === 'running' && <span className="import-status-running"><div className="ai-spinner"/>Analyseren</span>}
-                  {row.importStatus === 'done' && <span className="import-status-done">✓ {row.msg}</span>}
-                  {row.importStatus === 'error' && <span className="import-status-error">✗ Fout</span>}
+                  {row.importStatus==='waiting' && <span className="import-status-waiting">Wacht</span>}
+                  {row.importStatus==='running' && <span className="import-status-running"><div className="ai-spinner"/>Verwerken</span>}
+                  {row.importStatus==='done' && <span className="import-status-done">✓ {row.msg}</span>}
+                  {row.importStatus==='error' && <span className="import-status-error">✗ Fout</span>}
                 </div>
               </div>
             ))}
           </div>
-
-          {done && (
-            <div style={{marginTop:'16px',display:'flex',gap:'8px'}}>
-              <button className="btn btn-success" onClick={onDone}>Bekijk risico's →</button>
-              <button className="btn btn-secondary" onClick={reset}>Nieuwe import</button>
-            </div>
-          )}
-
-          {importing && (
-            <button className="btn btn-danger btn-sm" style={{marginTop:'12px'}} onClick={() => { abortRef.current = true; }}>
-              Stoppen
-            </button>
-          )}
+          {done && <div style={{marginTop:'16px',display:'flex',gap:'8px'}}>
+            <button className="btn btn-success" onClick={onDone}>Bekijk risico's →</button>
+            <button className="btn btn-secondary" onClick={reset}>Nieuwe import</button>
+          </div>}
+          {importing && <button className="btn btn-danger btn-sm" style={{marginTop:'12px'}} onClick={() => { abortRef.current = true; }}>Stoppen</button>}
         </div>
       )}
     </div>
   );
 }
+
 
 // Main App
 // Bibliotheek page
