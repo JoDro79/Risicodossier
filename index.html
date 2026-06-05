@@ -1157,64 +1157,207 @@ function ImportPage({ project, onDone, nextNum, risks }) {
 }
 
 // Main App
+// Bibliotheek page
+function BibliotheekPage({ onImport }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState(new Set());
+
+  useEffect(() => {
+    sbFetch('/risico_bibliotheek?order=created_at.desc')
+      .then(d => { setItems(d || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const filtered = items.filter(r => !search || (r.gebeurtenis||'').toLowerCase().includes(search.toLowerCase()));
+
+  const toggle = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAll = () => setSelected(s => s.size === filtered.length ? new Set() : new Set(filtered.map(r => r.id)));
+
+  const exportBibliotheek = () => {
+    const wb = XLSX.utils.book_new();
+    const data = [['Ongewenste gebeurtenis','Oorzaken','Gevolgen','Beheersmaatregelen','Kans_i','Tijd_i','Geld_i','Kwaliteit_i','Veiligheid_i','Omgeving_i','Kans_r','Tijd_r','Geld_r','Bron project']];
+    items.forEach(r => data.push([r.gebeurtenis,r.oorzaken,r.gevolgen,r.beheersmaatregelen,r.kans_i,r.tijd_i,r.geld_i,r.kwaliteit_i,r.veiligheid_i,r.omgeving_i,r.kans_r,r.tijd_r,r.geld_r,r.bron_project]));
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    ws['!cols'] = [{wch:40},{wch:40},{wch:40},{wch:40},{wch:8},{wch:8},{wch:8},{wch:8},{wch:8},{wch:8},{wch:8},{wch:8},{wch:8},{wch:20}];
+    XLSX.utils.book_append_sheet(wb, ws, 'Uitvoeringsrisicos');
+    XLSX.writeFile(wb, `Uitvoeringsbibliotheek_${new Date().toISOString().slice(0,10)}.xlsx`);
+    showToast('Bibliotheek geëxporteerd', 'success');
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Verwijderen uit bibliotheek?')) return;
+    await sbFetch(`/risico_bibliotheek?id=eq.${id}`, { method: 'DELETE', prefer: '' });
+    setItems(i => i.filter(r => r.id !== id));
+    showToast('Verwijderd');
+  };
+
+  return (
+    <div>
+      <div style={{marginBottom:'20px'}}>
+        <h2 style={{fontSize:'18px',fontWeight:600,marginBottom:'4px'}}>Uitvoeringsbibliotheek</h2>
+        <p style={{color:'var(--text2)',fontSize:'13px'}}>Risico's met fase "Uitvoering" worden hier automatisch opgeslagen. Selecteer risico's om te importeren naar het huidige project.</p>
+      </div>
+      <div style={{display:'flex',gap:'8px',marginBottom:'16px',flexWrap:'wrap',alignItems:'center'}}>
+        <input style={{width:'220px'}} placeholder="Zoeken..." value={search} onChange={e => setSearch(e.target.value)} />
+        <button className="btn btn-secondary btn-sm" onClick={toggleAll}>{selected.size === filtered.length && filtered.length > 0 ? 'Deselecteer alles' : 'Selecteer alles'}</button>
+        {selected.size > 0 && <button className="btn btn-primary btn-sm" onClick={() => onImport(items.filter(r => selected.has(r.id)))}>↓ Importeer {selected.size} naar project</button>}
+        <button className="btn btn-success btn-sm" onClick={exportBibliotheek} style={{marginLeft:'auto'}}>↓ Download bibliotheek</button>
+      </div>
+      {loading ? <div style={{color:'var(--text2)'}}>Laden...</div> : filtered.length === 0 ? (
+        <div className="empty"><div className="empty-icon">📚</div><p>Nog geen uitvoeringsrisico's. Sla een risico op met fase "Uitvoering" om het hier te zien.</p></div>
+      ) : (
+        <div className="table-wrap">
+          <table className="risk-table">
+            <thead><tr>
+              <th style={{width:30}}></th>
+              <th>Ongewenste gebeurtenis</th>
+              <th style={{width:70}}>Score I</th>
+              <th style={{width:70}}>Score R</th>
+              <th style={{width:120}}>Bron project</th>
+              <th style={{width:60}}></th>
+            </tr></thead>
+            <tbody>{filtered.map(r => {
+              const si = riskScore(r,'i'), sr = riskScore(r,'r');
+              return (
+                <tr key={r.id}>
+                  <td><input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} /></td>
+                  <td><div className="event-text">{r.gebeurtenis}</div></td>
+                  <td>{si > 0 ? <span className={`score-pill ${scoreClass(si)}`}>{si}</span> : '—'}</td>
+                  <td>{sr > 0 ? <span className={`score-pill ${scoreClass(sr)}`}>{sr}</span> : '—'}</td>
+                  <td style={{fontSize:'11px',color:'var(--text3)'}}>{r.bron_project||'—'}</td>
+                  <td><button className="btn btn-icon btn-danger btn-sm" onClick={() => handleDelete(r.id)}>🗑</button></td>
+                </tr>
+              );
+            })}</tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Project selector page
+function ProjectSelector({ onSelect, onNew }) {
+  const [projects, setProjects] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    sbFetch('/risico_projecten?order=created_at.desc')
+      .then(d => { setProjects(d || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const handleDelete = async (e, id) => {
+    e.stopPropagation();
+    if (!window.confirm('Project en alle risico\'s verwijderen?')) return;
+    await sbFetch(`/risico_items?project_id=eq.${id}`, { method: 'DELETE', prefer: '' });
+    await sbFetch(`/risico_projecten?id=eq.${id}`, { method: 'DELETE', prefer: '' });
+    setProjects(p => p.filter(x => x.id !== id));
+    showToast('Project verwijderd');
+  };
+
+  return (
+    <div style={{minHeight:'100vh',background:'var(--bg)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'24px'}}>
+      <div style={{width:'100%',maxWidth:'560px'}}>
+        <div style={{textAlign:'center',marginBottom:'32px'}}>
+          <div style={{fontFamily:'var(--mono)',fontSize:'13px',color:'var(--accent)',letterSpacing:'0.1em',marginBottom:'8px'}}>RISICODOSSIER</div>
+          <div style={{fontSize:'22px',fontWeight:600,color:'var(--text)'}}>Kies een project</div>
+        </div>
+        <button className="btn btn-primary" style={{width:'100%',marginBottom:'16px',padding:'12px'}} onClick={onNew}>+ Nieuw project aanmaken</button>
+        {loading ? <div style={{textAlign:'center',color:'var(--text2)'}}>Laden...</div> : projects.length === 0 ? (
+          <div style={{textAlign:'center',color:'var(--text3)',fontSize:'13px'}}>Nog geen projecten. Maak er een aan.</div>
+        ) : (
+          <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
+            {projects.map(p => (
+              <div key={p.id} onClick={() => onSelect(p)} style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'14px 16px',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'space-between',transition:'border-color 0.15s'}}
+                onMouseEnter={e => e.currentTarget.style.borderColor='var(--border2)'}
+                onMouseLeave={e => e.currentTarget.style.borderColor='var(--border)'}>
+                <div>
+                  <div style={{fontWeight:500,color:'var(--text)',marginBottom:'2px'}}>{p.naam}</div>
+                  <div style={{fontSize:'11px',color:'var(--text3)',fontFamily:'var(--mono)'}}>{p.nummer || '—'} · {p.opsteller || '—'} · {p.datum_actualisatie || '—'}</div>
+                </div>
+                <button className="btn btn-icon btn-danger" onClick={e => handleDelete(e, p.id)} title="Verwijderen">🗑</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function App() {
+  const [screen, setScreen] = useState('selector'); // selector | app | newproject
   const [page, setPage] = useState('dashboard');
   const [project, setProject] = useState(null);
   const [risks, setRisks] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [editingRisk, setEditingRisk] = useState(null);
   const [showEditor, setShowEditor] = useState(false);
-
-  // Load project
-  useEffect(() => {
-    (async () => {
-      try {
-        const projects = await sbFetch('/risico_projecten?order=created_at.desc&limit=1');
-        if (projects?.length > 0) {
-          setProject(projects[0]);
-          const r = await sbFetch(`/risico_items?project_id=eq.${projects[0].id}&order=volgnummer.asc`);
-          setRisks(r || []);
-        }
-      } catch (e) { showToast('Verbindingsfout: ' + e.message, 'error'); }
-      setLoading(false);
-    })();
-  }, []);
 
   const loadRisks = async (pid) => {
     const r = await sbFetch(`/risico_items?project_id=eq.${pid}&order=volgnummer.asc`);
     setRisks(r || []);
   };
 
+  const openProject = async (p) => {
+    setProject(p);
+    setLoading(true);
+    await loadRisks(p.id);
+    setLoading(false);
+    setScreen('app');
+    setPage('dashboard');
+  };
+
   const handleProjectSave = async (p) => {
     setProject(p);
-    if (p?.id) loadRisks(p.id);
+    if (p?.id) { await loadRisks(p.id); setScreen('app'); setPage('dashboard'); }
   };
 
-  const handleAddRisk = () => {
-    setEditingRisk(null);
-    setShowEditor(true);
-    setPage('risicos');
-  };
+  const handleAddRisk = () => { setEditingRisk(null); setShowEditor(true); setPage('risicos'); };
+  const handleEditRisk = (r) => { setEditingRisk(r); setShowEditor(true); setPage('risicos'); };
 
-  const handleEditRisk = (r) => {
-    setEditingRisk(r);
-    setShowEditor(true);
-    setPage('risicos');
+  // Auto-sync uitvoeringsrisico's naar bibliotheek
+  const syncToLibrary = async (risk, projectNaam) => {
+    if (risk.fase !== 'Uitvoering') return;
+    try {
+      // Check if already in library (same gebeurtenis + bron_project)
+      const existing = await sbFetch(`/risico_bibliotheek?gebeurtenis=eq.${encodeURIComponent(risk.gebeurtenis)}&bron_project=eq.${encodeURIComponent(projectNaam)}`);
+      const payload = {
+        gebeurtenis: risk.gebeurtenis,
+        oorzaken: risk.oorzaken,
+        gevolgen: risk.gevolgen,
+        beheersmaatregelen: risk.beheersmaatregelen,
+        kans_i: risk.kans_i, tijd_i: risk.tijd_i, geld_i: risk.geld_i,
+        kwaliteit_i: risk.kwaliteit_i, veiligheid_i: risk.veiligheid_i, omgeving_i: risk.omgeving_i,
+        kans_r: risk.kans_r, tijd_r: risk.tijd_r, geld_r: risk.geld_r,
+        kwaliteit_r: risk.kwaliteit_r, veiligheid_r: risk.veiligheid_r, omgeving_r: risk.omgeving_r,
+        bron_project: projectNaam
+      };
+      if (existing?.length > 0) {
+        await sbFetch(`/risico_bibliotheek?id=eq.${existing[0].id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+      } else {
+        await sbFetch('/risico_bibliotheek', { method: 'POST', body: JSON.stringify(payload) });
+      }
+    } catch(e) { /* silent */ }
   };
 
   const handleSaveRisk = async (form) => {
     if (!project?.id) { showToast('Stel eerst een project in', 'error'); return; }
     const payload = { ...form, project_id: project.id };
-    let result;
     if (form.id) {
-      result = await sbFetch(`/risico_items?id=eq.${form.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+      await sbFetch(`/risico_items?id=eq.${form.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
     } else {
-      result = await sbFetch('/risico_items', { method: 'POST', body: JSON.stringify(payload) });
+      await sbFetch('/risico_items', { method: 'POST', body: JSON.stringify(payload) });
     }
+    // Sync to library if uitvoering
+    if (form.fase === 'Uitvoering') await syncToLibrary(form, project.naam);
     await loadRisks(project.id);
     setShowEditor(false);
     setEditingRisk(null);
-    showToast('Risico opgeslagen', 'success');
+    showToast(form.fase === 'Uitvoering' ? 'Risico opgeslagen en toegevoegd aan uitvoeringsbibliotheek ✓' : 'Risico opgeslagen', 'success');
   };
 
   const handleDeleteRisk = async (r) => {
@@ -1224,7 +1367,43 @@ function App() {
     showToast('Risico verwijderd');
   };
 
+  // Import from bibliotheek into current project
+  const handleBibliotheekImport = async (selected) => {
+    if (!project?.id) { showToast('Geen project geselecteerd', 'error'); return; }
+    let start = risks.length > 0 ? Math.max(...risks.map(r => r.volgnummer || 0)) + 1 : 1;
+    for (const r of selected) {
+      await sbFetch('/risico_items', { method: 'POST', body: JSON.stringify({
+        project_id: project.id, volgnummer: start++,
+        gebeurtenis: r.gebeurtenis, oorzaken: r.oorzaken, gevolgen: r.gevolgen,
+        beheersmaatregelen: r.beheersmaatregelen,
+        kans_i: r.kans_i, tijd_i: r.tijd_i, geld_i: r.geld_i,
+        kwaliteit_i: r.kwaliteit_i, veiligheid_i: r.veiligheid_i, omgeving_i: r.omgeving_i,
+        kans_r: r.kans_r, tijd_r: r.tijd_r, geld_r: r.geld_r,
+        kwaliteit_r: r.kwaliteit_r, veiligheid_r: r.veiligheid_r, omgeving_r: r.omgeving_r,
+        status: 'Concept', fase: 'Uitvoering'
+      })});
+    }
+    await loadRisks(project.id);
+    setPage('risicos');
+    showToast(`${selected.length} risico's geïmporteerd uit bibliotheek`, 'success');
+  };
+
   const nextNum = risks.length > 0 ? Math.max(...risks.map(r => r.volgnummer || 0)) + 1 : 1;
+
+  // Project selector screen
+  if (screen === 'selector') {
+    return <ProjectSelector onSelect={openProject} onNew={() => setScreen('newproject')} />;
+  }
+
+  // New project screen
+  if (screen === 'newproject') {
+    return (
+      <div style={{minHeight:'100vh',background:'var(--bg)',padding:'24px'}}>
+        <div className="back-btn" onClick={() => setScreen('selector')}>← Terug naar projecten</div>
+        <ProjectSetup project={null} onSave={handleProjectSave} />
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -1239,6 +1418,7 @@ function App() {
     { id: 'dashboard', label: 'Dashboard', icon: '◈' },
     { id: 'risicos', label: "Risico's", icon: '⚑' },
     { id: 'import', label: 'Importeren', icon: '↑' },
+    { id: 'bibliotheek', label: 'Bibliotheek', icon: '📚' },
     { id: 'project', label: 'Project', icon: '⊙' },
   ];
 
@@ -1246,18 +1426,15 @@ function App() {
     <div className="app">
       <div className="topbar">
         <div className="topbar-left">
-          <div className="logo">RISICODOSSIER</div>
-          {project && <div className="project-badge">{project.naam}{project.nummer ? ` · ${project.nummer}` : ''}</div>}
+          <div className="logo" style={{cursor:'pointer'}} onClick={() => setScreen('selector')}>RISICODOSSIER</div>
+          {project && <div className="project-badge" style={{cursor:'pointer'}} onClick={() => setScreen('selector')}>{project.naam}{project.nummer ? ` · ${project.nummer}` : ''}</div>}
         </div>
         <div className="topbar-right">
           {project && (
             <button className="btn btn-success btn-sm" onClick={() => {
-              if (!project?.id) { showToast('Geen project geselecteerd', 'error'); return; }
               showToast('Export wordt voorbereid...');
               window.location.href = `/api/export?project_id=${project.id}`;
-            }}>
-              ↓ Excel exporteren
-            </button>
+            }}>↓ Excel exporteren</button>
           )}
           <button className="btn btn-primary btn-sm" onClick={handleAddRisk}>+ Risico</button>
         </div>
@@ -1265,11 +1442,8 @@ function App() {
       <div className="main">
         <div className="sidebar">
           {navItems.map(n => (
-            <div
-              key={n.id}
-              className={`nav-item ${page === n.id && !showEditor ? 'active' : ''}`}
-              onClick={() => { setPage(n.id); setShowEditor(false); }}
-            >
+            <div key={n.id} className={`nav-item ${page === n.id && !showEditor ? 'active' : ''}`}
+              onClick={() => { setPage(n.id); setShowEditor(false); }}>
               <span className="nav-icon">{n.icon}</span>
               {n.label}
               {n.id === 'risicos' && risks.filter(r => !['Vervallen','Beheerst'].includes(r.status)).length > 0 && (
@@ -1279,38 +1453,29 @@ function App() {
               )}
             </div>
           ))}
+          <div style={{position:'absolute',bottom:'16px',left:'0',width:'200px',padding:'0 16px'}}>
+            <div className="nav-item" style={{borderTop:'1px solid var(--border)',paddingTop:'12px'}}
+              onClick={() => setScreen('selector')}>
+              <span className="nav-icon">⇄</span> Wissel project
+            </div>
+          </div>
         </div>
         <div className="content">
-          {/* Dashboard */}
-          {page === 'dashboard' && !showEditor && (
-            <Dashboard risks={risks} project={project} />
-          )}
-
-          {/* Risk list / editor */}
+          {page === 'dashboard' && !showEditor && <Dashboard risks={risks} project={project} />}
           {page === 'risicos' && (
             showEditor ? (
-              <RiskEditor
-                risk={editingRisk}
-                nextNum={nextNum}
-                onSave={handleSaveRisk}
-                onCancel={() => { setShowEditor(false); setEditingRisk(null); }}
-              />
+              <RiskEditor risk={editingRisk} nextNum={nextNum} onSave={handleSaveRisk}
+                onCancel={() => { setShowEditor(false); setEditingRisk(null); }} />
             ) : (
-              <RiskList
-                risks={risks}
-                onAdd={handleAddRisk}
-                onEdit={handleEditRisk}
-                onDelete={handleDeleteRisk}
-              />
+              <RiskList risks={risks} onAdd={handleAddRisk} onEdit={handleEditRisk} onDelete={handleDeleteRisk} />
             )
           )}
-
-          {/* Import */}
           {page === 'import' && !showEditor && (
-            <ImportPage project={project} onDone={async () => { if(project?.id) { await loadRisks(project.id); setPage('risicos'); } }} nextNum={nextNum} risks={risks} />
+            <ImportPage project={project} onDone={async () => { await loadRisks(project.id); setPage('risicos'); }} nextNum={nextNum} risks={risks} />
           )}
-
-          {/* Project settings */}
+          {page === 'bibliotheek' && !showEditor && (
+            <BibliotheekPage onImport={handleBibliotheekImport} />
+          )}
           {page === 'project' && !showEditor && (
             <ProjectSetup project={project} onSave={handleProjectSave} />
           )}
